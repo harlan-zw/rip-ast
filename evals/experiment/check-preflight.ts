@@ -10,7 +10,7 @@ import { parseManifest } from './manifest.ts'
 async function main() {
   const [action, ...args] = process.argv.slice(2)
   if (action === 'attempt') {
-    const [project, task, root, provenance, mode, scope] = args
+    const [project, task, root, provenance, mode, scope, variant] = args
     const captured = JSON.parse(readFileSync(provenance, 'utf8')) as { scenario: { id: string, symbol: string, file: string, tests: string }, capture: { original: string, files: Record<string, string> } }[]
     const row = captured.find(row => row.scenario.id === task)!
     const module = Object.entries(row.capture.files).find(([, code]) => code.includes(`function ${row.scenario.symbol}`))![0]
@@ -23,7 +23,7 @@ async function main() {
       const forced = mode !== 'direct'
       const executable = forced ? join(root, 'packages/cli/bin/ripide.mjs') : join(project, 'node_modules/vitest/vitest.mjs')
       const params = forced
-        ? ['check', row.scenario.symbol, ...context.args, '--base', 'HEAD', '--json', '--artifact', `.checks/${color}.json`]
+        ? ['check', row.scenario.symbol, '--from', module, ...context.args, ...(variant === 'guided' && color === 'red' ? [] : ['--base', 'HEAD']), '--json', '--artifact', `.checks/${color}.json`]
         : ['run', context.testPath, ...context.args, '--reporter=json', `--outputFile=.checks/${color}.json`]
       if (!forced)
         writeFileSync(test, `import {test, expect, vi} from 'vitest'\nimport {${row.scenario.symbol}} from '${relative(dirname(test), join(project, module))}'\n${row.scenario.tests}\n`)
@@ -38,6 +38,13 @@ async function main() {
     writeFileSync(join(project, row.scenario.file), row.capture.original)
     execute('green')
     rmSync(test, { force: true })
+    if (variant === 'guided' && mode !== 'direct') {
+      const page = spawnSync(process.execPath, [join(root, 'packages/cli/bin/ripide.mjs'), 'page', '--input', '.checks/green.json'], { cwd: project, encoding: 'utf8', timeout: 10000 })
+      if (page.error)
+        throw page.error
+      assert.equal(page.status, 0, page.stderr || page.stdout)
+      assert.ok(page.stdout.trim(), 'Artifact paging must return a root menu.')
+    }
     const check = (expected: number, message?: string) => {
       const result = spawnSync(join(process.env.RIPIDE_EXPERIMENT_RECORD_DIRECTORY!, 'home/bin/check-behavior'), [], { cwd: project, encoding: 'utf8', timeout: 60000 })
       if (result.error)
@@ -97,8 +104,9 @@ async function main() {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
   const provenance = parsed.value.artifacts.find(artifact => artifact.path.endsWith('/source-provenance.json'))!.path
   const scope = parsed.value.id.includes('-projects-') ? 'projects' : 'slices'
+  const variant = parsed.value.id.endsWith('-guided') ? 'guided' : 'baseline'
   for (const mode of ['direct', 'forced', 'hybrid'] as const)
-    parsed.value.runners[mode] = { model: 'scripted', reasoning: 'none', command: [process.execPath, fileURLToPath(import.meta.url), 'attempt', '{project}', '{task}', root, provenance, mode, scope] }
+    parsed.value.runners[mode] = { model: 'scripted', reasoning: 'none', command: [process.execPath, fileURLToPath(import.meta.url), 'attempt', '{project}', '{task}', root, provenance, mode, scope, variant] }
   const report = await executeExperiment(parsed.value, out)
   const expected = parsed.value.tasks.length * 3 * parsed.value.repeats
   assert.equal(report.attempts.length, expected)

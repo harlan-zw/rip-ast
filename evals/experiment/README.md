@@ -117,7 +117,10 @@ Existing tests remain unchanged. Newly authored test modules must be removed.
 The independent oracle compiles outside the project so its output cannot invalidate execution receipts.
 
 Register both instruction variants before model dispatch. Keep their source commits and runtime artifacts identical.
-The baseline gives the commands. The guided variant adds an ordered recipe and a final checklist summary.
+The baseline gives the commands. The guided variant names the source and caller, then orders genuine red and green runs.
+It uses artifact paging and retains assertion text and execution artifacts for controller validation.
+Ripide red runs omit `--base HEAD`. Green runs include it to record execution against the repaired diff.
+The final `check-behavior` command checks behavior and evidence. Run it without flags.
 Each variant uses the same assertion, preservation, build, typecheck, and cleanup gates.
 
 ```sh
