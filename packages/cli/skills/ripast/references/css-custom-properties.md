@@ -18,6 +18,7 @@ Supported cases:
 - Static templates, literal interpolation, and proven string concatenation.
 - Complete static names beside unknown values, such as `` `var(--foo-a, ${fallback})` ``.
 - Complete names in static operands beside unknown concatenation values.
+- Parentheses and TypeScript `as` or `satisfies` wrappers preserve proof and dynamic warnings.
 
 Comments, CSS quoted content, module paths, prose, markup samples, and longer names stay unchanged.
 Names accept `--` followed by identifier characters: letters, digits, underscores, hyphens, and Unicode characters.

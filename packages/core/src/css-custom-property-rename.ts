@@ -146,9 +146,14 @@ function plausible(pattern: string, name: string): boolean {
 
 type StaticValue = { _tag: 'Known', value: string | number | boolean | null } | { _tag: 'Unknown' }
 
+function unwrapExpression(node: any): any {
+  while (node && ['ParenthesizedExpression', 'TSAsExpression', 'TSSatisfiesExpression'].includes(node.type))
+    node = node.expression
+  return node
+}
+
 function staticValue(node: any): StaticValue {
-  if (node?.type === 'ParenthesizedExpression' || node?.type === 'TSAsExpression' || node?.type === 'TSSatisfiesExpression')
-    return staticValue(node.expression)
+  node = unwrapExpression(node)
   if (node?.type === 'Literal' && (node.value === null || ['string', 'number', 'boolean'].includes(typeof node.value)))
     return { _tag: 'Known', value: node.value }
   if (node?.type === 'BinaryExpression' && node.operator === '+') {
@@ -182,6 +187,7 @@ function staticString(node: any): string | undefined {
 }
 
 function patternString(node: any): string {
+  node = unwrapExpression(node)
   const value = staticString(node)
   if (value !== undefined)
     return value
@@ -293,12 +299,16 @@ function scriptEdits(source: string, program: any, map: ReadonlyMap<string, stri
       else {
         // Match against the complete expression before editing any known operand.
         const chunks = (operand: any, cursor: number): void => {
+          operand = unwrapExpression(operand)
           const text = staticString(operand)
           if (text !== undefined) {
             const safe = matches.filter(match => !match.reason && match.start >= cursor && match.end <= cursor + text.length)
               .map(match => ({ ...match, start: match.start - cursor, end: match.end - cursor }))
             if (operand.type === 'Literal' && typeof operand.value === 'string') {
               rewrite(text, operand.start + 1, operand.end - 1, source[operand.start], safe)
+            }
+            else if (operand.type === 'TemplateLiteral' && !operand.expressions.length) {
+              rewrite(text, operand.start + 1, operand.end - 1, '`', safe)
             }
             else {
               const after = applyTextEdits(text, safe.flatMap(match => map.has(match.name) ? [{ start: match.start, end: match.end, replacement: map.get(match.name)! }] : []))

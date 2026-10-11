@@ -15,7 +15,7 @@ function run(cwd: string, args: string[]) {
 it.each(['TypeScript', 'React', 'Next', 'Solid', 'Vue', 'Nuxt', 'Octane'])('previews and applies custom properties through the CLI in %s', (framework) => {
   const vue = ['Vue', 'Nuxt'].includes(framework)
   const filename = vue ? 'View.vue' : framework === 'Octane' ? 'View.tsrx' : framework === 'TypeScript' ? 'view.ts' : 'view.tsx'
-  const templates = 'const template = `--foo-${"a"}`; const uncertain = `--foo-${suffix}`;'
+  const templates = 'const template = `--foo-${"a"}`; const uncertain = `--foo-${suffix}`; const wrapped = (`--foo-${wrappedSuffix}`) + "";'
   const bindings = `export const key = "--foo-a"; export const style = { "--foo-a": "red", color: "var(--foo-a)" }; ${templates}`
   const source = vue ? `<script setup>const key = "--foo-a"; ${templates}</script><style>.x { --foo-a: red; color: var(--foo-a) }</style>` : framework === 'Octane' ? `${bindings}\nexport function View() @{ <div style={style} /> }` : framework === 'TypeScript' ? bindings : `${bindings}\nexport const View = () => <div style={{ "--foo-a": "red", color: "var(--foo-a)" }} />;`
   const dependency = { TypeScript: 'typescript', React: 'react', Next: 'next', Solid: 'solid-js', Vue: 'vue', Nuxt: 'nuxt', Octane: 'octane' }[framework]!
@@ -31,8 +31,9 @@ it.each(['TypeScript', 'React', 'Next', 'Solid', 'Vue', 'Nuxt', 'Octane'])('prev
       const payload = JSON.parse(result.stdout)
       expect(payload._tag).toBe(apply ? 'Applied' : 'Preview')
       expect(payload.data.verification).toBeDefined()
-      expect(payload.data.warnings).toHaveLength(1)
+      expect(payload.data.warnings).toHaveLength(2)
       expect(payload.data.warnings[0]).toContain('`--foo-${suffix}`')
+      expect(payload.data.warnings[1]).toContain('`--foo-${wrappedSuffix}`')
       expect(payload.data.limitations).toBeDefined()
       expect(readFileSync(`${fx.dir}/${filename}`, 'utf8')).toBe(apply ? source.replaceAll('--foo-a', '--theme-b').replace('`--foo-${"a"}`', '`--theme-b`') : source)
     }

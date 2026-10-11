@@ -230,4 +230,20 @@ describe('css custom property rename', () => {
     }
     finally { fx.cleanup() }
   })
+
+  it.each(['(VALUE)', '(VALUE as string)', '(VALUE satisfies string)'])('keeps dynamic proof through %s wrappers', async (wrapper) => {
+    const dynamic = wrapper.replace('VALUE', '`--foo-${suffix}`')
+    const css = wrapper.replace('VALUE', '\'var(--foo-a,\' + fallback')
+    const staticCss = wrapper.replace('VALUE', '`--foo-a: red;`')
+    const source = `export const dynamic = ${dynamic} + ''; export const css = ${css} + ')'; export const staticCss = ${staticCss} + fallback;`
+    const fx = makeFixture({ 'source.ts': source }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes[0]?.after).toBe(source.replaceAll('--foo-a', '--theme-b'))
+      expect(result.warnings).toHaveLength(1)
+      expect(result.warnings[0]).toContain(dynamic)
+      expect(result.warnings[0]).toContain('source.ts:1:')
+    }
+    finally { fx.cleanup() }
+  })
 })
