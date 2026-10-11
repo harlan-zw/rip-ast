@@ -48,6 +48,28 @@ if (action === 'pass-then-fail') {
   return { directory, marker, command, manifest, run: join(directory, 'run'), cleanup: () => rmSync(directory, { recursive: true, force: true }) }
 }
 
+it.each(['fail', 'pass'])('handles %s evidence before later checks without aborting the study', async (evidence) => {
+  const fx = fixture()
+  fx.manifest.repairs = 0
+  const task = fx.manifest.tasks[0]!
+  task.expected = { 'source.ts': 'export const old = 1\n' }
+  task.checks = [
+    { command: fx.command(evidence), phase: 'verification', role: 'controller' },
+    { command: fx.command('expensive-build'), phase: 'verification', role: 'controller' },
+  ]
+  task.qualityGates = [{ id: 'final-evidence', command: fx.command('final-gate'), required: true }]
+  try {
+    const report = await executeExperiment(fx.manifest, fx.run)
+    const dispatches = evidence === 'fail' ? ['pass', 'fail'] : ['pass', 'pass', 'expensive-build', 'final-gate']
+    assert.deepEqual(readFileSync(fx.marker, 'utf8').trim().split('\n'), [...dispatches, ...dispatches, ...dispatches])
+    assert.deepEqual(report.attempts.map(attempt => attempt.quality), Array.from({ length: 3 }).fill(evidence === 'fail' ? 'failed' : 'passed'))
+    assert.equal(report.attempts.every(attempt => attempt.preparedSeconds! > attempt.armSeconds!), true)
+    assert.equal(report.qualityGates.every(gate => gate._tag === (evidence === 'fail' ? 'NotRun' : 'Passed')), true)
+    assert.equal(existsSync(join(fx.run, 'abort-checkpoint.json')), false)
+  }
+  finally { fx.cleanup() }
+})
+
 it.each(['setup', 'runner', 'timeout', 'lifecycle', 'required-gate', 'check-timeout', 'version'])('halts dispatch after %s infrastructure failure and retains a checkpoint', async (scenario) => {
   const fx = fixture(scenario === 'runner' ? 'fail' : scenario === 'timeout' ? 'hold' : 'pass')
   const task = fx.manifest.tasks[0]!
@@ -91,10 +113,12 @@ it('retains earlier successful attempts when a later runner fails', async () => 
   finally { fx.cleanup() }
 })
 
-it.each(['pass', 'refuse', 'failed-gate', 'optional-unavailable'])('keeps %s domain outcomes counted and permits registered repairs', async (scenario) => {
+it.each(['pass', 'refuse', 'failed-check', 'failed-gate', 'optional-unavailable'])('keeps %s domain outcomes counted and permits registered repairs', async (scenario) => {
   const fx = fixture(scenario === 'refuse' ? 'refuse' : 'pass')
   if (scenario === 'failed-gate')
     fx.manifest.tasks[0]!.qualityGates = [{ id: 'semantic', command: fx.command('fail'), required: true }]
+  if (scenario === 'failed-check')
+    fx.manifest.tasks[0]!.checks = [{ command: fx.command('fail'), phase: 'verification', role: 'controller' }]
   if (scenario === 'optional-unavailable')
     fx.manifest.tasks[0]!.qualityGates = [{ id: 'optional', command: fx.command('unavailable'), required: false }]
   try {

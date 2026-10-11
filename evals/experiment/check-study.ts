@@ -78,7 +78,7 @@ const manifest = parseManifest({
       { command: [process.execPath, runner, 'preflight', '{project}', '-', scenario.id, root, values.model!, opencode, values.variant!, values.scope!, sourcePath], phase: 'setup', role: 'controller' },
     ],
     checks: [
-      { command: [process.execPath, quality, '{project}', scenario.id], phase: 'verification', role: 'controller' },
+      { command: [process.execPath, quality, '{project}', scenario.id, sourcePath, '{mode}'], phase: 'verification', role: 'controller' },
       ...(values.scope === 'projects' ? projectContext(scenario.id).checks.map(command => ({ command, phase: 'verification', role: 'controller' })) : []),
     ],
     symbols: [],
