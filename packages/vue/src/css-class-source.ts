@@ -21,9 +21,26 @@ export function vueCssCustomPropertyRegions(file: CssClassSourceFile): CssCustom
     if (block.lang && !['css', 'scss', 'sass', 'less', 'postcss', 'pcss'].includes(block.lang))
       throw new Error(`Cannot inspect the style language in ${file.rel}.`)
   }
+  const attributes: CssCustomPropertyRegion[] = []
+  function visitStyles(node: any): void {
+    for (const prop of node.props ?? []) {
+      const boundStyle = prop.type === 7 && prop.name === 'bind' && prop.arg?.isStatic && prop.arg.content === 'style'
+      const value = prop.type === 6 && prop.name === 'style' ? prop.value : boundStyle ? prop.exp : undefined
+      if (value) {
+        // Use authored bytes. HTML entities need a separate encoding-aware refactor.
+        const raw = value.loc.source
+        const quoted = prop.type === 6 && (raw.startsWith('"') || raw.startsWith('\''))
+        attributes.push({ _tag: 'Review', source: quoted ? raw.slice(1, -1) : raw, value: value.content, start: value.loc.start.offset + Number(quoted), syntax: boundStyle ? 'Script' : 'Css', reason: 'Vue style attribute requires manual review' })
+      }
+    }
+    for (const child of node.children ?? []) visitStyles(child)
+  }
+  if (descriptor.template?.ast)
+    visitStyles(descriptor.template.ast)
   return [
     ...scripts.map(block => ({ _tag: 'Script' as const, source: block.content, start: block.loc.start.offset, filename: `${file.abs}.${block.lang ?? 'js'}` })),
     ...descriptor.styles.filter(block => !block.src).map(block => ({ _tag: 'Css' as const, source: block.content, start: block.loc.start.offset, lang: block.lang ?? 'css' })),
+    ...attributes,
   ]
 }
 export { rewriteVue as rewriteVueCssClassTokens }

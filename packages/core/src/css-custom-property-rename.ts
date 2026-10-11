@@ -9,6 +9,7 @@ export type CssCustomPropertyRenameOptions = CssClassSourceOptions
 export interface CssCustomPropertyRenameResult {
   changes: FileChange[]
   warnings: string[]
+  limitations: string[]
   scanned: number
   verification: Verification
   regressions: never[]
@@ -18,13 +19,21 @@ export interface CssCustomPropertyRenameResult {
 export type CssCustomPropertyRegion
   = | { _tag: 'Css', source: string, start: number, lang: string }
     | { _tag: 'Script', source: string, start: number, filename: string }
+    | { _tag: 'Review', source: string, value: string, start: number, syntax: 'Css' | 'Script', reason: string }
 
 const NAME = /^--[-\w\u0080-\uFFFF]+$/
 const IDENT = /[-\w\u0080-\uFFFF]/
 const UNKNOWN = '\0'
 
 interface Token { value: string, start: number, end: number }
-interface Match { start: number, end: number, name: string }
+interface Match { start: number, end: number, name: string, reason?: string }
+
+const LIMITATIONS = [
+  'Variable bindings, function results, and opaque names are not evaluated. Inspect runtime producers after rename.',
+  'Only files included by the glob and supported source regions are scanned. Include external blocks and generated consumers separately.',
+  'Style attributes, tagged templates, and CSS queries require manual review when warned. Unsupported languages require a separate search.',
+  'Style compilation and type verification are skipped. Run project checks after apply.',
+]
 
 /** A lossless token walk, not a stylesheet printer. Strings and comments are opaque. */
 function cssMatches(source: string, lang: string): Match[] {
@@ -34,6 +43,34 @@ function cssMatches(source: string, lang: string): Match[] {
     const start = i
     if (/\s/.test(source[i])) {
       i++
+      continue
+    }
+    // URL contents are opaque. In preprocessors, protocol slashes are not comments.
+    if (/^url\(/i.test(source.slice(i))) {
+      i += 4
+      let depth = 1
+      let quote = ''
+      while (i < source.length && depth) {
+        const char = source[i++]
+        if (char === '\\') {
+          i++
+          continue
+        }
+        if (quote) {
+          if (char === quote)
+            quote = ''
+        }
+        else if (char === '"' || char === '\'') {
+          quote = char
+        }
+        else if (char === '(') {
+          depth++
+        }
+        else if (char === ')') {
+          depth--
+        }
+      }
+      tokens.push({ start, end: i, value: '<url>' })
       continue
     }
     if (source.startsWith('/*', i) || (syntax.lineComments && source.startsWith('//', i))) {
@@ -96,6 +133,8 @@ function cssMatches(source: string, lang: string): Match[] {
     const registration = previous?.value === 'property' && before?.value === '@'
     if (declaration || reference || registration)
       matches.push({ start: token.start, end: token.end, name: token.value })
+    else if (previous?.value === '(' && [':', ')'].includes(tokens[index + 1]?.value))
+      matches.push({ start: token.start, end: token.end, name: token.value, reason: 'CSS query requires manual review' })
   }
   return matches
 }
@@ -175,11 +214,13 @@ function encodeContent(value: string, quote: string): string {
   return encoded
 }
 
-function scriptEdits(source: string, program: any, map: ReadonlyMap<string, string>, warn: (position: number, source: string) => void): TextEdit[] {
+function scriptEdits(source: string, program: any, map: ReadonlyMap<string, string>, warn: (position: number, source: string, reason?: string) => void): TextEdit[] {
   const edits: TextEdit[] = []
   const visited = new WeakSet<object>()
   function rewrite(value: string, start: number, end: number, quote: string, matches = stringMatches(value)): void {
-    const replacements = matches.flatMap(match => map.has(match.name) ? [{ start: match.start, end: match.end, replacement: map.get(match.name)! }] : [])
+    const replacements = matches.flatMap(match => !match.reason && map.has(match.name) ? [{ start: match.start, end: match.end, replacement: map.get(match.name)! }] : [])
+    for (const match of matches.filter(match => match.reason && map.has(match.name)))
+      warn(start, source.slice(start, end), match.reason)
     if (!replacements.length)
       return
     const raw = source.slice(start, end)
@@ -200,8 +241,10 @@ function scriptEdits(source: string, program: any, map: ReadonlyMap<string, stri
       const pattern = patternString(template)
       const matches = stringMatches(pattern)
       const raw = source.slice(node.start, node.end)
-      if (matches.some(match => [...map.keys()].some(name => (tagged || match.name.includes(UNKNOWN)) && plausible(match.name, name))))
-        warn(node.start, raw)
+      const uncertain = matches.some(match => [...map.keys()].some(name => (tagged || match.reason || match.name.includes(UNKNOWN)) && plausible(match.name, name)))
+      const hidden = pattern.includes(UNKNOWN) && stringMatches(pattern.replaceAll(UNKNOWN, ' ')).some(match => map.has(match.name) && !matches.some(original => original.name === match.name))
+      if (uncertain || hidden)
+        warn(node.start, raw, tagged ? 'Tagged template requires manual review' : hidden ? 'Unknown CSS context requires manual review' : undefined)
       if (tagged)
         return
       const value = staticString(node)
@@ -210,7 +253,7 @@ function scriptEdits(source: string, program: any, map: ReadonlyMap<string, stri
           rewrite(value, node.start + 1, node.end - 1, '`')
         }
         else {
-          const after = applyTextEdits(value, matches.flatMap(match => map.has(match.name) ? [{ start: match.start, end: match.end, replacement: map.get(match.name)! }] : []))
+          const after = applyTextEdits(value, matches.flatMap(match => !match.reason && map.has(match.name) ? [{ start: match.start, end: match.end, replacement: map.get(match.name)! }] : []))
           if (after !== value)
             edits.push({ start: node.start, end: node.end, replacement: node.type === 'TemplateLiteral' ? `\`${encodeContent(after, '`')}\`` : JSON.stringify(after) })
         }
@@ -224,7 +267,7 @@ function scriptEdits(source: string, program: any, map: ReadonlyMap<string, stri
           if (!chunk)
             return
           const current = chunk
-          const safe = matches.filter(match => !match.name.includes(UNKNOWN) && match.start >= current.cursor && match.end <= current.cursor + current.value.length)
+          const safe = matches.filter(match => !match.reason && !match.name.includes(UNKNOWN) && match.start >= current.cursor && match.end <= current.cursor + current.value.length)
           rewrite(current.value, current.start, current.end, '`', safe.map(match => ({ ...match, start: match.start - current.cursor, end: match.end - current.cursor })))
           chunk = undefined
         }
@@ -247,7 +290,30 @@ function scriptEdits(source: string, program: any, map: ReadonlyMap<string, stri
         }
         flush()
       }
-      // Partial concatenations and interpolation expressions are not standalone name sites.
+      else {
+        // Match against the complete expression before editing any known operand.
+        const chunks = (operand: any, cursor: number): void => {
+          const text = staticString(operand)
+          if (text !== undefined) {
+            const safe = matches.filter(match => !match.reason && match.start >= cursor && match.end <= cursor + text.length)
+              .map(match => ({ ...match, start: match.start - cursor, end: match.end - cursor }))
+            if (operand.type === 'Literal' && typeof operand.value === 'string') {
+              rewrite(text, operand.start + 1, operand.end - 1, source[operand.start], safe)
+            }
+            else {
+              const after = applyTextEdits(text, safe.flatMap(match => map.has(match.name) ? [{ start: match.start, end: match.end, replacement: map.get(match.name)! }] : []))
+              if (after !== text)
+                edits.push({ start: operand.start, end: operand.end, replacement: JSON.stringify(after) })
+            }
+          }
+          else if (operand.type === 'BinaryExpression' && operand.operator === '+') {
+            chunks(operand.left, cursor)
+            chunks(operand.right, cursor + patternString(operand.left).length)
+          }
+        }
+        chunks(node, 0)
+      }
+      // Interpolation expressions are not standalone name sites.
       return
     }
     if (node.type === 'Literal' && typeof node.value === 'string') {
@@ -255,8 +321,11 @@ function scriptEdits(source: string, program: any, map: ReadonlyMap<string, stri
       rewrite(node.value, node.start + 1, node.end - 1, source[node.start])
       return
     }
-    if (node.type === 'JSXAttribute' && node.value?.type === 'Literal')
+    if (node.type === 'JSXAttribute' && node.value?.type === 'Literal') {
+      if (node.name?.name === 'style' && stringMatches(node.value.value).some(match => map.has(match.name)))
+        warn(node.start, source.slice(node.start, node.end), 'JSX quoted style attribute requires manual review')
       return
+    }
     if (node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration' || node.type === 'ImportExpression')
       return
     if (node.type === 'CallExpression' && node.callee?.name === 'require')
@@ -283,9 +352,9 @@ export async function runCssCustomPropertyRename(map: ReadonlyMap<string, string
   const warnings: string[] = []
   const files = map.size ? readCssClassSourceFiles(opts, ['.tsrx']) : []
   for (const file of files) {
-    const warn = (position: number, source: string): void => {
+    const warn = (position: number, source: string, reason = 'Review dynamic CSS custom property'): void => {
       const { line, col } = posToLineCol(file.source, position)
-      warnings.push(`${file.rel}:${line}:${col}: Review dynamic CSS custom property: ${source}`)
+      warnings.push(`${file.rel}:${line}:${col}: ${reason}: ${source}`)
     }
     const extension = file.engine?.extensions.find(extension => extension.suffixes.some(suffix => file.abs.endsWith(suffix)))
     let regions: CssCustomPropertyRegion[]
@@ -302,11 +371,30 @@ export async function runCssCustomPropertyRename(map: ReadonlyMap<string, string
     }
     const edits: TextEdit[] = []
     for (const region of regions) {
-      if (file.source.slice(region.start, region.start + region.source.length) !== region.source)
+      if (!Number.isInteger(region.start) || region.start < 0 || file.source.slice(region.start, region.start + region.source.length) !== region.source)
         throw new Error(`Extension returned non-authored CSS custom property source for ${file.rel}.`)
-      if (region._tag === 'Css') {
+      if (region._tag === 'Review') {
+        if (region.syntax === 'Css') {
+          if (cssMatches(region.value, 'css').some(match => [...map.keys()].some(name => plausible(match.name, name))))
+            warn(region.start, region.source, region.reason)
+        }
+        else {
+          const prefix = 'const value = ('
+          const script = `${prefix}${region.value})`
+          const parsed = parseSync('ripide-style-expression.ts', script)
+          if (parsed.errors.length)
+            throw new Error(`Cannot inspect style expression in ${file.rel}: script parse errors.`)
+          const pending = scriptEdits(script, parsed.program, map, () => warn(region.start, region.source, region.reason))
+          if (pending.length)
+            warn(region.start, region.source, region.reason)
+        }
+      }
+      else if (region._tag === 'Css') {
         for (const match of cssMatches(region.source, region.lang)) {
-          if (match.name.includes(UNKNOWN)) {
+          if (match.reason && [...map.keys()].some(name => plausible(match.name, name))) {
+            warn(region.start + match.start, region.source.slice(match.start, match.end), match.reason)
+          }
+          else if (match.name.includes(UNKNOWN)) {
             if ([...map.keys()].some(name => plausible(match.name, name)))
               warn(region.start + match.start, region.source.slice(match.start, match.end))
           }
@@ -328,5 +416,5 @@ export async function runCssCustomPropertyRename(map: ReadonlyMap<string, string
     if (after !== file.source)
       changes.push({ path: file.abs, rel: file.rel, before: file.source, after })
   }
-  return { changes, warnings, scanned: files.length, regressions: [], verification: { _tag: 'Skipped', reason: changes.length ? 'not-applicable' : 'no-changes' } }
+  return { changes, warnings: [...new Set(warnings)], limitations: [...LIMITATIONS], scanned: files.length, regressions: [], verification: { _tag: 'Skipped', reason: changes.length ? 'not-applicable' : 'no-changes' } }
 }

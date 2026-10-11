@@ -158,4 +158,76 @@ describe('css custom property rename', () => {
     }
     finally { fx.cleanup() }
   })
+
+  it('renames complete names in dynamic concatenations and warns about uncertain function prefixes', async () => {
+    const fx = makeFixture({
+      'source.ts': 'export const css = \'var(--foo-a,\' + fallback + \')\'; export const uncertain = `${prefix}var(--foo-a)`;',
+    }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes[0].after).toBe('export const css = \'var(--theme-b,\' + fallback + \')\'; export const uncertain = `${prefix}var(--foo-a)`;')
+      expect(result.warnings).toHaveLength(1)
+      expect(result.warnings[0]).toContain('`${prefix}var(--foo-a)`')
+    }
+    finally { fx.cleanup() }
+  })
+
+  it.each(['scss', 'sass', 'less'])('keeps %s references after an unquoted URL visible', async (ext) => {
+    const source = ext === 'sass'
+      ? '.x\n  background: url(https://x.invalid/a) var(--foo-a)\n'
+      : '.x { background: url(https://x.invalid/a) var(--foo-a); --foo-a: red; }'
+    const fx = makeFixture({ [`theme.${ext}`]: source }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes[0].after).toBe(source.replaceAll('--foo-a', '--theme-b'))
+      expect(result.warnings).toEqual([])
+    }
+    finally { fx.cleanup() }
+  })
+
+  it('surfaces unsupported CSS query sites and coverage limits for agent review', async () => {
+    const fx = makeFixture({ 'theme.css': '@supports (--foo-a: red) { .x { color: var(--foo-a) } }' }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes[0].after).toContain('var(--theme-b)')
+      expect(result.warnings[0]).toContain('theme.css:1:12:')
+      expect(result.warnings[0]).toContain('--foo-a')
+      expect(result.warnings[0]).toContain('query')
+      expect(result.limitations.join(' ')).toContain('Variable bindings')
+      expect(result.limitations.join(' ')).toContain('glob')
+    }
+    finally { fx.cleanup() }
+  })
+
+  it('surfaces Vue style attributes and JSX quoted style attributes without editing them', async () => {
+    const fx = makeFixture({
+      'View.vue': '<template><div style="color: var(--foo-a)" :style="{ color: `var(--foo-${suffix})` }" title="--foo-a" /></template>',
+      'View.tsx': 'export const View = () => <Box style="color: var(--foo-a)" title="--foo-a" />;',
+    }, false)
+    try {
+      const engine = createEngine({ extensions: [createVueExtension()] })
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir, engine: engine.services })
+      expect(result.changes).toEqual([])
+      expect(result.warnings).toHaveLength(3)
+      expect(result.warnings.some(warning => warning.includes('View.vue:1:') && warning.includes('`var(--foo-${suffix})`'))).toBe(true)
+      expect(result.warnings.some(warning => warning.includes('View.tsx:1:') && warning.includes('color: var(--foo-a)'))).toBe(true)
+      expect(result.warnings.every(warning => !warning.includes('title='))).toBe(true)
+    }
+    finally { fx.cleanup() }
+  })
+
+  it('reviews encoded Vue style attributes using their decoded values and authored source', async () => {
+    const source = '<template><div style="color: var(--foo&#45;a)" :style="{ color: &quot;var(--foo-a)&quot; }" /></template>'
+    const fx = makeFixture({ 'View.vue': source }, false)
+    try {
+      const engine = createEngine({ extensions: [createVueExtension()] })
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir, engine: engine.services })
+      expect(result.changes).toEqual([])
+      expect(result.warnings).toHaveLength(2)
+      expect(result.warnings[0]).toContain('var(--foo&#45;a)')
+      expect(result.warnings[1]).toContain('&quot;var(--foo-a)&quot;')
+      expect(fx.read('View.vue')).toBe(source)
+    }
+    finally { fx.cleanup() }
+  })
 })

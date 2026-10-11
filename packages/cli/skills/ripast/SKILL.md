@@ -64,7 +64,8 @@ Read [saved evidence](references/paging.md) for path selection and session reque
 Batch known commands. An exact CSS mapping needs no `css-class-scan`.
 CSS and template transforms have no type verification; run their project checks.
 For CSS custom properties, read [supported cases and limits](references/css-custom-properties.md).
-Review dynamic warnings before apply. Save complete warnings with `--json --artifact <new-file.json>`.
+Review source warnings and result `limitations` before apply.
+Save complete warnings with `--json --artifact <new-file.json>`. Use the reference's agent review procedure for skipped sites.
 If no files changed, resolve the target, root, or configuration before retrying.
 If diagnostics increased, inspect the cause. Never disable verification to force success.
 Inspect more files only when results expose uncertainty. Repeat a successful check only after another edit or new failure.

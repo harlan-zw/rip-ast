@@ -554,6 +554,7 @@ interface MutatingResult {
   verification: Verification
   regressions: { file: string, line: number, col: number, code: number, message: string }[]
   warnings?: string[]
+  limitations?: string[]
 }
 
 function compactMutationResult(r: MutatingResult, manifest = buildChangeManifest(r.changes), args: OutputArgs = {}) {
@@ -563,6 +564,7 @@ function compactMutationResult(r: MutatingResult, manifest = buildChangeManifest
     verification: compactVerification(r.verification),
     ...(r.regressions.length ? { regressions, diagnosticPage } : {}),
     ...(r.warnings?.length ? mutationWarnings(r, args, true) : {}),
+    ...(r.limitations ? { limitations: r.limitations } : {}),
     ...manifest,
     changes,
     changePage,
@@ -598,6 +600,7 @@ function emitResult(r: MutatingResult, apply: boolean, json: boolean = false, ag
           verification: r.verification,
           regressions: diagnostics(r, args, false).results,
           ...mutationWarnings(r, args, false),
+          ...(r.limitations ? { limitations: r.limitations } : {}),
           changes: selectOutput(r.changes, selection(args, false), c => c.rel).results.map(c => ({ path: c.rel, absolutePath: c.path, before: c.before, after: c.after })),
           changePage: (() => {
             const { results, ...page } = selectOutput(r.changes, selection(args, false), c => c.rel)
@@ -611,6 +614,8 @@ function emitResult(r: MutatingResult, apply: boolean, json: boolean = false, ag
     return
   }
   const warningOutput = mutationWarnings(r, args, agentProfile)
+  for (const limitation of r.limitations ?? [])
+    writeText(args, `limitation: ${limitation}\n`)
   for (const w of warningOutput.warnings ?? []) {
     if (args.command === 'css-custom-property-rename')
       writeText(args, `warning: ${w}\n`)
@@ -816,7 +821,7 @@ const cssClassRenameCmd = defineCommand({
 })
 
 const cssCustomPropertyRenameCmd = defineCommand({
-  meta: { name: 'css-custom-property-rename', description: 'Rename exact CSS custom properties in styles and static JS/TS strings. Review dynamic warnings. No typecheck verification.' },
+  meta: { name: 'css-custom-property-rename', description: 'Rename exact CSS custom properties in styles and static JS/TS strings. Review source warnings and result limitations. No typecheck verification.' },
   args: {
     from: { type: 'positional', required: true, description: 'Old custom property. Place names after --.' },
     to: { type: 'positional', required: true, description: 'New custom property. Example: -- --foo-a --theme-b.' },

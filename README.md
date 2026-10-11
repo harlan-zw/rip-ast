@@ -317,13 +317,15 @@ Comments, CSS quoted content, prose, module paths, and longer names stay unchang
 Dynamic names stay unchanged. Plausible matches produce warnings with file, line, column, and source.
 For example, renaming `--foo-a` flags `` `--foo-${bar}` `` for review.
 Tagged templates receive warnings. Variable bindings and function results are not evaluated.
-Vue template attributes, Svelte markup, Stylus, and arbitrary CSS identifier punctuation are unsupported.
+Vue style attributes, JSX quoted style attributes, and CSS query names receive source warnings for manual review.
+Svelte markup, Stylus, and arbitrary CSS identifier punctuation are unsupported.
 Names accept `--` followed by letters, digits, underscores, hyphens, or Unicode characters.
 CSS identifier escapes and JS string escapes are decoded before matching.
 
 Dry runs preserve files. `--apply` uses the existing atomic write boundary.
 Verification reports `not-applicable`; this transform does not run a typecheck or compile styles.
 Run the project's checks after applying. Output limits preserve complete warnings in `--artifact` evidence.
+Results include `limitations`, even when no source warning exists. Inspect runtime producers and files outside the glob separately.
 
 </details>
 
@@ -569,9 +571,8 @@ Instances belong to the caller. Independent CLI processes do not share this cach
 
 ## Limitations
 
-**CSS custom properties.** CSS class migration handles class tokens and `@apply`.
-It does not rename custom properties such as `--foo-a` in CSS, JavaScript, or Vue styles.
-It does not report dynamic variable candidates such as `` `--foo-${bar}` ``.
+**CSS custom properties.** Use `css-custom-property-rename` for declarations, `var()` references, and static JS/TS strings.
+Review source warnings and result `limitations`. Opaque runtime names require a separate search and project checks.
 
 **Scoping with `--glob`.** Pass comma-separated patterns. Prefix a pattern with `!` to exclude matching files:
 
