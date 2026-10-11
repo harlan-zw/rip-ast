@@ -126,6 +126,7 @@ const LIMITATIONS = [
   'Style attributes, tagged templates, and CSS queries require manual review when warned. Unsupported languages require a separate search.',
   'Style compilation and type verification are skipped. Run project checks after apply.',
   'Script CSS payloads require recognised declaration or function headers. Inspect unknown headers separately.',
+  'Value-only script strings beginning with custom property names require manual review. Their CSS property is unknown.',
 ]
 
 /** A lossless token walk, not a stylesheet printer. Strings and comments are opaque. */
@@ -312,8 +313,15 @@ function stringMatches(value: string): Match[] {
   const delimiter = trimmed.search(/[:(]/)
   const header = trimmed.slice(0, delimiter).trimEnd().replaceAll(UNKNOWN, 'a')
   const cssHeader = delimiter !== -1 && (trimmed[delimiter] === ':' ? NAME.test(header) || CSS_PROPERTIES.has(header.toLowerCase()) : CSS_FUNCTIONS.has(header.toLowerCase()))
-  if (/<\/?[a-z]/i.test(value) || (!cssHeader && !/^[^{};]+\{/.test(trimmed)))
+  if (/<\/?[a-z]/i.test(value))
     return []
+  if (!cssHeader && !/^[^{};]+\{/.test(trimmed)) {
+    // A bare value has no property context. Reuse CSS token boundaries, but never edit it.
+    if (!/^\0*--/.test(trimmed))
+      return []
+    const prefix = '--ripide-review:'
+    return cssMatches(prefix + value, 'css').filter(match => match.start >= prefix.length).map(match => ({ ...match, start: match.start - prefix.length, end: match.end - prefix.length, reason: 'Value-only CSS string requires manual review' }))
+  }
   return cssMatches(value, 'css')
 }
 
@@ -376,13 +384,13 @@ function scriptEdits(source: string, program: any, map: ReadonlyMap<string, stri
       const hidden = pattern.includes(UNKNOWN) && stringMatches(pattern.replaceAll(UNKNOWN, ' ')).some(match => map.has(match.name) && !matches.some(original => original.name === match.name))
       const nested = pattern.includes(UNKNOWN) && opaqueCandidate(template)
       if (uncertain || hidden || nested)
-        warn(node.start, raw, tagged ? 'Tagged template requires manual review' : nested ? 'Unknown expression contains a CSS custom property candidate' : hidden ? 'Unknown CSS context requires manual review' : undefined)
+        warn(node.start, raw, tagged ? 'Tagged template requires manual review' : nested ? 'Unknown expression contains a CSS custom property candidate' : hidden ? 'Unknown CSS context requires manual review' : matches.find(match => match.reason && [...map.keys()].some(name => plausible(match.name, name)))?.reason)
       if (tagged)
         return
       const value = staticString(node)
       if (value !== undefined) {
         if (node.type === 'TemplateLiteral' && !node.expressions.length) {
-          rewrite(value, node.start + 1, node.end - 1, '`')
+          rewrite(value, node.start + 1, node.end - 1, '`', matches.filter(match => !match.reason))
         }
         else {
           const after = applyTextEdits(value, matches.flatMap(match => !match.reason && map.has(match.name) ? [{ start: match.start, end: match.end, replacement: map.get(match.name)! }] : []))

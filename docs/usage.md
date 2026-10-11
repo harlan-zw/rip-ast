@@ -215,6 +215,10 @@ Vue style attributes, JSX quoted style attributes, and CSS query names receive s
 Attribute matching decodes entities and preserves authored source in warnings.
 Ambiguous CSS values receive warnings, including animation names that resemble custom properties.
 Script CSS payloads require known declaration or function headers. Inspect new or nonstandard headers separately.
+Value-only strings beginning with custom property names receive source warnings for plausible matches.
+Examples include `"--foo-a 1s"`, `"--other, --foo-a"`, and `` `--foo-${suffix} 1s` ``.
+These strings stay unchanged. Inspect the CSS property before editing them.
+They could name animations or unrelated data.
 Svelte markup, Stylus, and arbitrary CSS identifier punctuation are unsupported.
 Names accept `--` followed by letters, digits, underscores, hyphens, or Unicode characters.
 CSS identifier escapes and JS string escapes are decoded before matching.

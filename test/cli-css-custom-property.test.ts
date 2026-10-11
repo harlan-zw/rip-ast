@@ -15,7 +15,7 @@ function run(cwd: string, args: string[]) {
 it.each(['TypeScript', 'React', 'Next', 'Solid', 'Vue', 'Nuxt', 'Octane'])('previews and applies custom properties through the CLI in %s', (framework) => {
   const vue = ['Vue', 'Nuxt'].includes(framework)
   const filename = vue ? 'View.vue' : framework === 'Octane' ? 'View.tsrx' : framework === 'TypeScript' ? 'view.ts' : 'view.tsx'
-  const templates = 'const template = `--foo-${"a"}`; const uncertain = `--foo-${suffix}`; const wrapped = (`--foo-${wrappedSuffix}`) + ""; const nested = `var(${name("--foo-a")})`; const prose = "Note: use var(--foo-a) here"; const transition = "transition-property: --foo-a";'
+  const templates = 'const template = `--foo-${"a"}`; const uncertain = `--foo-${suffix}`; const wrapped = (`--foo-${wrappedSuffix}`) + ""; const nested = `var(${name("--foo-a")})`; const prose = "Note: use var(--foo-a) here"; const transition = "transition-property: --foo-a"; const bare = "--foo-a 1s"; const list = `--other, --foo-${"a"}`; const dynamicValue = `--foo-${suffix} 1s`;'
   const bindings = `export const key = "--foo-a"; export const style = { "--foo-a": "red", color: "var(--foo-a)" }; ${templates}`
   const jsx = ['React', 'Next', 'Solid'].includes(framework)
   const source = vue ? `<script setup>const key = "--foo-a"; ${templates}</script><style>.x { --foo-a: red; color: var(--foo-a) }</style>` : framework === 'Octane' ? `${bindings}\nexport function View() @{ <div style={style} /> }` : framework === 'TypeScript' ? bindings : `${bindings}\nexport const View = () => <div style={{ "--foo-a": "red", color: "var(--foo-a)" }} />; export const Quoted = () => <Box style="color: var(--foo&#45;a)" />;`
@@ -32,14 +32,17 @@ it.each(['TypeScript', 'React', 'Next', 'Solid', 'Vue', 'Nuxt', 'Octane'])('prev
       const payload = JSON.parse(result.stdout)
       expect(payload._tag).toBe(apply ? 'Applied' : 'Preview')
       expect(payload.data.verification).toBeDefined()
-      expect(payload.data.warnings).toHaveLength(jsx ? 4 : 3)
+      expect(payload.data.warnings).toHaveLength(jsx ? 7 : 6)
       expect(payload.data.warnings[0]).toContain('`--foo-${suffix}`')
       expect(payload.data.warnings[1]).toContain('`--foo-${wrappedSuffix}`')
       expect(payload.data.warnings[2]).toContain('`var(${name("--foo-a")})`')
+      expect(payload.data.warnings[3]).toContain('--foo-a 1s')
+      expect(payload.data.warnings[4]).toContain('`--other, --foo-${"a"}`')
+      expect(payload.data.warnings[5]).toContain('`--foo-${suffix} 1s`')
       if (jsx)
-        expect(payload.data.warnings[3]).toContain('style="color: var(--foo&#45;a)"')
+        expect(payload.data.warnings[6]).toContain('style="color: var(--foo&#45;a)"')
       expect(payload.data.limitations).toBeDefined()
-      expect(readFileSync(`${fx.dir}/${filename}`, 'utf8')).toBe(apply ? source.replaceAll('--foo-a', '--theme-b').replace('`--foo-${"a"}`', '`--theme-b`').replace('name("--theme-b")', 'name("--foo-a")').replace('Note: use var(--theme-b) here', 'Note: use var(--foo-a) here') : source)
+      expect(readFileSync(`${fx.dir}/${filename}`, 'utf8')).toBe(apply ? source.replaceAll('--foo-a', '--theme-b').replace('`--foo-${"a"}`', '`--theme-b`').replace('name("--theme-b")', 'name("--foo-a")').replace('Note: use var(--theme-b) here', 'Note: use var(--foo-a) here').replace('"--theme-b 1s"', '"--foo-a 1s"') : source)
     }
   }
   finally { fx.cleanup() }
@@ -60,7 +63,7 @@ it('documents the separator and refuses invalid custom property names before app
 })
 
 it('keeps dynamic warnings in bounded JSON and complete artifacts', () => {
-  const source = Array.from({ length: 60 }, (_, index) => index % 2 ? `const p${index} = \`var(\${name("--foo-a")})\`;` : `const p${index} = \`--foo-\${bar${index}}\`;`).join('\n')
+  const source = Array.from({ length: 60 }, (_, index) => index % 3 === 0 ? `const p${index} = "--foo-a 1s";` : index % 3 === 1 ? `const p${index} = \`--foo-\${bar${index}} 1s\`;` : `const p${index} = \`var(\${name("--foo-a")})\`;`).join('\n')
   const fx = makeFixture({ 'source.ts': source }, false)
   try {
     const result = run(fx.dir, ['--json', '--max-bytes', '2048', '--artifact', 'evidence.json', '--', '--foo-a', '--theme-b'])
@@ -72,6 +75,7 @@ it('keeps dynamic warnings in bounded JSON and complete artifacts', () => {
     const artifact = JSON.parse(readFileSync(`${fx.dir}/evidence.json`, 'utf8'))
     expect(JSON.stringify(artifact)).toContain('source.ts:60:')
     expect(JSON.stringify(artifact)).toContain('Unknown expression contains a CSS custom property candidate')
+    expect(JSON.stringify(artifact)).toContain('Value-only CSS string requires manual review')
     expect(JSON.stringify(artifact)).toContain('Variable bindings')
     const page = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', cli, 'page', '--input', 'evidence.json', '--path', '/warnings', '--offset', '59', '--limit', '1'], { cwd: fx.dir, encoding: 'utf8' })
     expect(page.status, page.stderr).toBe(0)
@@ -81,15 +85,16 @@ it('keeps dynamic warnings in bounded JSON and complete artifacts', () => {
   finally { fx.cleanup() }
 })
 
-it('surfaces coverage limits and source warnings in bounded agent text', () => {
-  const fx = makeFixture({ 'source.ts': 'export const name = `--foo-${suffix}`;' }, false)
+it('surfaces coverage limits and value-only warnings in bounded agent text', () => {
+  const fx = makeFixture({ 'source.ts': 'export const name = `--foo-${suffix} 1s`;' }, false)
   try {
     const result = run(fx.dir, ['--profile', 'agent', '--max-bytes', '2048', '--', '--foo-a', '--theme-b'])
     expect(result.status, result.stderr).toBe(0)
     expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(2048)
     expect(result.stdout).toContain('limitation: Variable bindings')
     expect(result.stdout).toContain('source.ts:1:')
-    expect(result.stdout).toContain('`--foo-${suffix}`')
+    expect(result.stdout).toContain('`--foo-${suffix} 1s`')
+    expect(result.stdout).toContain('Value-only CSS string requires manual review')
   }
   finally { fx.cleanup() }
 })

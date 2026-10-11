@@ -69,6 +69,7 @@ Batch known commands. An exact CSS mapping needs no `css-class-scan`.
 CSS and template transforms have no type verification; run their project checks.
 For CSS custom properties, read [supported cases and limits](references/css-custom-properties.md).
 Review source warnings and result `limitations` before apply.
+Value-only strings such as `"--foo-a 1s"` receive warnings. Inspect their CSS property before editing.
 Warnings include nested static candidates, ambiguous CSS values, and encoded style attributes. Prove their meaning before editing.
 Save complete warnings with `--json --artifact <new-file.json>`. Use the reference's agent review procedure for skipped sites.
 If no files changed, resolve the target, root, or configuration before retrying.

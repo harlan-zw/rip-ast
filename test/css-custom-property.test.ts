@@ -8,6 +8,52 @@ import { makeFixture } from './helpers.ts'
 const map = new Map([['--foo-a', '--theme-b']])
 
 describe('css custom property rename', () => {
+  it.each(['ts', 'js'])('warns about value-only %s strings without guessing their CSS property', async (ext) => {
+    const expressions = [
+      '"--foo-a 1s ease"',
+      '"--other, --foo-a"',
+      '`--foo-${"a"} 1s`',
+      '`--foo-${suffix} 1s`',
+      '"--foo-a" + " 1s"',
+      '`--foo-a ${duration}`',
+      '" --foo-a "',
+    ]
+    const source = expressions.map((expression, index) => `const value${index} = ${expression};`).join('\n')
+    const fx = makeFixture({ [`source.${ext}`]: source }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes).toEqual([])
+      expect(result.warnings).toHaveLength(expressions.length)
+      for (const [index, expression] of expressions.entries()) {
+        const warning = result.warnings[index]
+        expect(warning).toContain(`source.${ext}:${index + 1}:`)
+        expect(warning).toContain('Value-only CSS string requires manual review')
+        expect(warning).toContain(expression.startsWith('"') ? expression.slice(1, -1) : expression)
+      }
+      expect(fx.read(`source.${ext}`)).toBe(source)
+    }
+    finally { fx.cleanup() }
+  })
+
+  it('ignores unrelated names, prose, comments, and quoted content in value-only candidates', async () => {
+    const source = [
+      'const longer = "--foo-ab 1s";',
+      'const other = `--other-${suffix} 1s`;',
+      'const prose = "please use --foo-a 1s";',
+      'const comment = "--other /* --foo-a */";',
+      'const quoted = "--other \'--foo-a\'";',
+      '// --foo-a 1s',
+      'const markup = "<p>--foo-a 1s</p>";',
+    ].join('\n')
+    const fx = makeFixture({ 'source.ts': source }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes).toEqual([])
+      expect(result.warnings).toEqual([])
+    }
+    finally { fx.cleanup() }
+  })
+
   it('leaves colon and parenthetical prose unchanged while renaming CSS payloads', async () => {
     const source = [
       'const a = "Note: use var(--foo-a) here";',

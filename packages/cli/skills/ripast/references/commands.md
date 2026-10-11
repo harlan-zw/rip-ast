@@ -10,6 +10,7 @@ Mutations default to dry-run. If the target is uncertain, review the result, the
 | `ripide delete <symbol> --from <file>` | Delete a declaration without references. |
 | `ripide rename-file <old> <new>` | Rename a file and update importers, including Vue consumers. |
 | `ripide css-class-rename <from> <to>` | Migrate class tokens. Use `--map <file.json>` for bulk mappings. |
+| `ripide css-custom-property-rename -- <from> <to>` | Rename exact custom properties. Review warnings for dynamic names and value-only strings. |
 | `ripide vue-template-wrap <selector> <wrapper>` | Wrap matching Vue elements. |
 | `ripide vue-template-unwrap <selector>` | Remove matching wrappers, preserving children. |
 | `ripide scan <pattern>` | Resolve uncertain occurrences. |
