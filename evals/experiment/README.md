@@ -35,6 +35,33 @@ pnpm exec tsx evals/experiment/cli.ts fixture --installed --nuxt --out ~/scratch
 pnpm exec tsx evals/experiment/cli.ts run --manifest ~/scratch/ripide-pilot-registration/fixture-manifest.json --out ~/scratch/ripide-pilot-results
 ```
 
+Execution requires Linux, systemd 254 or newer, and an available systemd user manager.
+The service owns command deadlines. Closing the foreground watcher leaves the experiment running.
+The output path has a private sibling directory named `<output>.supervisor`.
+It retains the registration, environment, complete controller logs, and terminal service outcome.
+Keep both directories private. The environment file can contain provider credentials.
+
+If the watcher closes, reconnect without dispatching another experiment:
+
+```sh
+pnpm exec tsx evals/experiment/cli.ts watch --out ~/scratch/ripide-pilot-results
+```
+
+The manifest determines the outer deadline, including registered commands, repairs, and shutdown allowance.
+The service stops its whole cgroup when that deadline expires, including detached process groups.
+Each completed command and attempt updates `progress.json` atomically.
+An outer timeout preserves partial evidence. It cannot produce a completed comparison report.
+Missing service state requires inspection. The watcher never redispatches the registration.
+Host reboot and user manager shutdown remain outside this guarantee.
+
+Before model calls, exercise watcher interruption, command timeouts, and detached child cleanup:
+
+```sh
+RIPIDE_SYSTEMD_PREFLIGHT=1 pnpm exec vitest run test/experiment-supervisor.test.ts
+```
+
+This native preflight requires the user manager. CI runs input refusal checks without that dependency.
+
 The fixture includes rename, move, file relocation, import replacement, architecture, and mixed tasks.
 An installed dependency fixture runs `pnpm install --offline` and builds its complete TypeScript project.
 The Nuxt fixture installs pinned direct dependencies, then runs prepare, typecheck, and build.
@@ -80,7 +107,8 @@ No persistent test source is needed in the evaluated fixture after completion.
 ## Optimize transient checks
 
 Use `--scope projects` for complete Git copies with original lockfiles, dependencies, and Vitest configurations.
-Setup builds and typechecks each project before seeding and committing the bug.
+Setup prepares project imports before seeding and committing the bug.
+Nuxt creates its module stub and generated imports. Unhead needs no baseline build or typecheck.
 Final gates repeat the project build and typecheck after repair.
 Unhead uses a private incremental typecheck cache inside each fresh project.
 An independent probe confirmed that changed source errors invalidate that cache.
