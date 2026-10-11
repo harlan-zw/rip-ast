@@ -9,7 +9,7 @@ export function projectContext(id: string) {
     return {
       args: ['--project', 'unit'],
       testPath: 'test/unit/transient-eval.test.ts',
-      prepare: [['pnpm', 'build'], ['pnpm', 'typecheck']],
+      prepare: [['pnpm', 'exec', 'nuxt-module-build', 'build', '--stub'], ['pnpm', 'exec', 'nuxt-module-build', 'prepare']],
       checks: [['pnpm', 'build'], ['pnpm', 'typecheck']],
       generated: ['dist', 'playground/.nuxt', 'playground/node_modules', '.nuxt'],
     }
@@ -19,9 +19,9 @@ export function projectContext(id: string) {
     return {
       args: ['--config', 'packages/unhead/vitest.config.ts'],
       testPath: 'packages/unhead/test/transient-eval.test.ts',
-      prepare: [['pnpm', 'build'], typecheck],
+      prepare: [],
       checks: [['pnpm', 'build'], typecheck],
-      generated: ['angular', 'bundler', 'cli', 'devtools', 'dom', 'eslint-plugin', 'react', 'schema-org', 'shared', 'solid-js', 'ssr', 'svelte', 'unhead', 'vue', 'devtools-app'].map(name => `packages/${name}/dist`),
+      generated: [...['angular', 'bundler', 'cli', 'devtools', 'dom', 'eslint-plugin', 'react', 'schema-org', 'shared', 'solid-js', 'ssr', 'svelte', 'unhead', 'vue', 'devtools-app'].map(name => `packages/${name}/dist`), 'packages/angular/.angular/cache'],
     }
   }
   throw new Error('Choose a registered check case.')
