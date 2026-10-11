@@ -29,6 +29,17 @@ Use `--input -` to read one JSON document from stdin:
 ripide page --input - < /tmp/evidence.json
 ```
 
+If a collection's item shape is unknown, inspect one item to discover its child paths:
+
+```bash
+ripide page --input /tmp/evidence.json --path /files/0
+```
+
+This example requires a tree artifact with at least one file.
+The item menu reveals declarations and imports without dumping their contents.
+If the row shape is known, select required fields or a child path directly.
+Keep complete rows when their context helps. Exceeding the soft byte target is allowed.
+
 For a tree artifact, inspect declarations in its first file:
 
 ```bash

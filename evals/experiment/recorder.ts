@@ -138,6 +138,8 @@ export async function recordCommand(options: {
   const tracker = createTraceTracker(directory, child.pid)
   const tracking = traced ? setInterval(tracker.collect, 50) : undefined
   let timedOut = false
+  let tracerShutdown: ReturnType<typeof setTimeout> | undefined
+  let tracerForced = false
   const terminate = (signal: NodeJS.Signals) => {
     if (!child.pid)
       return
@@ -154,6 +156,20 @@ export async function recordCommand(options: {
           if ((error as NodeJS.ErrnoException).code !== 'ESRCH')
             throw error
         }
+      }
+      if (signal === 'SIGKILL' && tracerShutdown === undefined) {
+        // Allow terminal records to flush, then bound a stalled tracer's shutdown.
+        tracerShutdown = setTimeout(() => {
+          tracerForced = true
+          tracker.terminate('SIGKILL')
+          try {
+            process.kill(-child.pid!, 'SIGKILL')
+          }
+          catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ESRCH')
+              throw error
+          }
+        }, 2000)
       }
       return
     }
@@ -213,7 +229,12 @@ export async function recordCommand(options: {
   const streams = [pipeline(child.stdout, tap, dependencies.openOutput(stdoutPath)), pipeline(child.stderr, dependencies.openOutput(stderrPath))]
   const closed = new Promise<ParentExit>((resolve) => {
     child.once('error', error => resolve({ _tag: 'SpawnFailed', message: error.message }))
-    child.once('close', (code, signal) => resolve(timedOut ? { _tag: 'TimedOut', code, signal } : signal ? { _tag: 'Signaled', signal } : { _tag: 'Exited', code: code ?? 1 }))
+    child.once('close', (code, signal) => {
+      clearTimeout(timeout)
+      clearTimeout(forced)
+      clearTimeout(tracerShutdown)
+      resolve(timedOut ? { _tag: 'TimedOut', code, signal } : signal ? { _tag: 'Signaled', signal } : { _tag: 'Exited', code: code ?? 1 })
+    })
   })
   let exit: Exit
   try {
@@ -246,6 +267,7 @@ export async function recordCommand(options: {
     clearInterval(tracking)
     clearTimeout(timeout)
     clearTimeout(forced)
+    clearTimeout(tracerShutdown)
     sample()
   }
   const completed = new Date().toISOString()
@@ -255,7 +277,7 @@ export async function recordCommand(options: {
     return { path, bytes: bytes.length, sha256: sha256(bytes) }
   }
   const traceArtifacts = readdirSync(directory).filter(name => name.startsWith('process.trace')).map(name => ({ path: join(directory, name), sha256: sha256(readFileSync(join(directory, name))) }))
-  const childLifecycle: RecordedCommand['childLifecycle'] = traced && traceArtifacts.length && traceArtifacts.every(artifact => /\+\+\+ (?:exited with|killed by)/.test(readFileSync(artifact.path, 'utf8'))) ? { _tag: 'ProvenComplete' } : { _tag: 'Unavailable', reason: traced ? 'Some traced child exits lack terminal records.' : 'Top-level recording cannot prove escaped child lifecycle. Remaining same-group processes are terminated.' }
+  const childLifecycle: RecordedCommand['childLifecycle'] = traced && !tracerForced && traceArtifacts.length && traceArtifacts.every(artifact => /\+\+\+ (?:exited with|killed by)/.test(readFileSync(artifact.path, 'utf8'))) ? { _tag: 'ProvenComplete' } : { _tag: 'Unavailable', reason: tracerForced ? 'The tracer required forced shutdown. Child lifecycle is not proven.' : traced ? 'Some traced child exits lack terminal records.' : 'Top-level recording cannot prove escaped child lifecycle. Remaining same-group processes are terminated.' }
   let resources: RecordedCommand['resources'] = { _tag: 'Unavailable', reason: 'GNU time did not produce complete resource categories.' }
   if (existsSync(timePath)) {
     const text = readFileSync(timePath, 'utf8')
