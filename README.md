@@ -325,6 +325,21 @@ ripide unused --exports all --json
 </details>
 
 <details>
+<summary><b>🔎 Check app/server runtime imports</b></summary>
+
+An app/server runtime import connects files classified as app and server code.
+The check reports resolved relative runtime imports across those groups.
+Classification uses file paths and `.server` or `.client` filename suffixes.
+Type-only imports, aliases, unresolved imports, and unclassified files are excluded.
+App code can also run on the server. The check does not prove runtime isolation.
+
+```bash
+ripide doctor --checks cross-realm-import
+```
+
+</details>
+
+<details>
 <summary><b>🤖 Drive from an AI agent</b></summary>
 
 `--json` emits the same contract in terminals and detected agent environments.
@@ -517,6 +532,10 @@ engine.commit(result)
 
 The CLI loads relevant optional packages. The SDK never loads optional packages automatically.
 Read the [extension contract and migration guide](./docs/engine.md) before adding a language.
+
+The optional SDK `profile` callback receives phase timing events during rename and move operations.
+Each `ProfileEvent` provides `phase` and elapsed milliseconds in `ms`.
+CLI `--profile auto|agent|full` selects output detail; it does not collect phase timings.
 
 Reuse declaration analysis during repeated SDK inspection:
 
