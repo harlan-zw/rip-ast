@@ -428,7 +428,7 @@ function collectLocalImports(source: string): Set<string> {
   return out
 }
 
-// --- Cross-realm (server <-> client) boundary check ---
+// App/server runtime import check.
 
 const APP_DIR_RE = /(?:^|\/)(?:app|pages|layouts|components|composables|middleware|plugins)(?:\/|$)/
 const SERVER_DIR_RE = /(?:^|\/)server(?:\/|$)/
@@ -476,7 +476,7 @@ function findCrossRealmImports(cwd: string, ctx: DoctorContext): DoctorFinding[]
         check: 'cross-realm-import',
         file: file.file,
         line: imp.line,
-        message: `${fromRealm}-realm file imports runtime value "${imp.imported || '*'}" from ${toRealm}-realm "${imp.source}"`,
+        message: `${fromRealm === 'app' ? 'App' : 'Server'} file imports runtime value "${imp.imported || '*'}" from ${toRealm} file "${imp.source}"`,
         detail: { fromRealm, toRealm, source: imp.source, imported: imp.imported },
       })
     }
