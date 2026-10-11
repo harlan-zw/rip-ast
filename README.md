@@ -110,8 +110,15 @@ If you switch projects or monorepo packages, run from the intended root.
 
 ## Usage
 
-Run commands from your project root. Commands preview changes by default; pass `--apply` to write.
+Run commands from your project root. Preview changes, then pass `--apply` to write them:
+
+```bash
+ripide rename useStore useAppStore
+ripide rename useStore useAppStore --apply
+```
+
 Use `--profile full` to see the full diff in an agent environment.
+See the [Usage reference](./docs/usage.md) for advanced options, output formats, and saved evidence.
 
 ### What can RipIDE do?
 
@@ -172,46 +179,15 @@ Replace an imported binding with a project export, such as replacing `eventHandl
 RipIDE updates references and imports, then removes the old import.
 It preserves the call arguments and function body.
 
-New imports preserve the replaced relative import's extension policy.
-For package imports, they follow relative imports in the consumer, then nearby project files.
-Without a local policy, they use extensionless paths.
-JavaScript paths keep emitted `.js`, `.mjs`, or `.cjs` endings for TypeScript targets.
-Review mixed import policies in the dry run before applying.
-
 ```bash
-ripide replace eventHandler defineAdminApiHandler
 ripide replace eventHandler defineAdminApiHandler --apply
 
-# Ambiguous target exports? Pick the declaring file
-ripide replace eventHandler defineAdminApiHandler --target-scope layers/admin/server/utils/admin-api.ts --apply
-
-# Route an existing binding through a named barrel and a framework alias
-ripide replace getSiteConfig getSiteConfig --target-scope ../nuxt-site-config/src/runtime/server/index.ts --target-import '#site-config/server' --apply
-
-# Select the original provider, including imported aliases and public barrels
-ripide replace eventHandler defineAdminApiHandler --source-scope server/legacy.ts --target-scope server/admin.ts --apply
+# If several exports match, select the target file
+ripide replace eventHandler defineAdminApiHandler --target-scope server/admin.ts --apply
 ```
 
-`--target-scope` can select a named re-export barrel outside the consumer project.
-`--target-import` sets its import path explicitly, including Nuxt aliases.
-Value and type exports retain their import kind. Existing imports from that path merge safely.
-
-`--source-scope` selects `from` as an export of the provider file.
-It follows local import aliases and named or star barrel chains.
-Local binding names and public export names stay unchanged.
-An unrelated provider with the same export name stays unchanged.
-Use `from=default` to select a named default declaration or an exported default identifier.
-The SDK accepts the same provider as `sourceScope` in `runReplace` or `engine.replace` options.
-
-Source replacement requires a native TypeScript or JavaScript project.
-Namespace imports, namespace exports, cyclic barrels, and ambiguous providers cause an error before writes.
-Anonymous default declarations cannot identify a source export.
-An edit inside the replacement's static dependency closure also causes an error, preventing wrapper recursion.
-Dynamic imports and `require` calls in that closure also cause an error.
-Unresolved dependencies and package entries that resolve only to declaration files also cause an error.
-`--glob` limits changed files. It does not expand these supported source shapes.
-Without `--source-scope`, replacement keeps its existing local binding selection.
-Default discovery still selects direct declarations and keeps the relative import policy.
+Use `--source-scope` to select the original provider and `--target-import` to set an import path.
+Review import paths in the preview. See the [Usage reference](./docs/usage.md#what-can-ripide-do) for provider selection and supported source shapes.
 
 </details>
 
@@ -299,38 +275,17 @@ ripide css-class-scan --by file
 <details>
 <summary><b>🎨 Rename CSS custom properties</b></summary>
 
-Rename exact declarations, `@property` registrations, and `var()` references.
-Bare property references work in `transition`, `transition-property`, and `will-change` values.
-The `--` separator prevents custom property names from becoming CLI options.
+Rename declarations, `@property` registrations, and `var()` references in styles and static JS/TS strings.
+Use `--` before custom property names so the CLI does not read them as options.
 
 ```bash
 ripide css-custom-property-rename -- --foo-a --theme-b
-ripide css-custom-property-rename --apply --json --artifact /tmp/css-plan.json -- --foo-a --theme-b
+ripide css-custom-property-rename --apply -- --foo-a --theme-b
 ```
 
-Supported sources include CSS, SCSS, Sass, Less, PostCSS, and Vue style blocks.
-JS/TS strings support exact names and CSS values, including React, Next, Solid, and Vue scripts.
-Octane TSRX uses its existing compiler opt-in.
-Static template names and literal interpolation work, even when other values remain dynamic.
-Proven string concatenations work. Folding an assembled name can remove its interpolation syntax.
-Comments, CSS quoted content, prose, module paths, and longer names stay unchanged.
-
-Dynamic names stay unchanged. Plausible matches produce warnings with file, line, column, and source.
-For example, renaming `--foo-a` flags `` `--foo-${bar}` `` for review.
-Tagged templates receive warnings. Variable bindings and function results are not evaluated.
-Static candidates nested inside unknown expressions receive source warnings. Their returned values remain unproven.
-Vue style attributes, JSX quoted style attributes, and CSS query names receive source warnings for manual review.
-Attribute matching decodes entities and preserves authored source in warnings.
-Ambiguous CSS values receive warnings, including animation names that resemble custom properties.
-Script CSS payloads require known declaration or function headers. Inspect new or nonstandard headers separately.
-Svelte markup, Stylus, and arbitrary CSS identifier punctuation are unsupported.
-Names accept `--` followed by letters, digits, underscores, hyphens, or Unicode characters.
-CSS identifier escapes and JS string escapes are decoded before matching.
-
-Dry runs preserve files. `--apply` uses the existing atomic write boundary.
-Verification reports `not-applicable`; this transform does not run a typecheck or compile styles.
-Run the project's checks after applying. Output limits preserve complete warnings in `--artifact` evidence.
-Results include `limitations`, even when no source warning exists. Inspect runtime producers and files outside the glob separately.
+Dynamic names stay unchanged. Review warnings and result `limitations`, then run your project's checks after applying.
+This command does not typecheck or compile styles.
+See the [Usage reference](./docs/usage.md#what-can-ripide-do) for supported sources and warning examples.
 
 </details>
 
@@ -380,151 +335,53 @@ ripide doctor --checks cross-realm-import
 <details>
 <summary><b>🤖 Drive from an AI agent</b></summary>
 
-`--json` emits the same contract in terminals and detected agent environments.
-The default JSON profile is compact. Use `--profile full` for complete source content.
-Every response contains `_tag`, `command`, `base`, and `data`.
-Mutation tags are `Preview`, `Applied`, `Refused`, or `Empty`. Discovery uses `Result`; failures use `Error`.
-For mutating commands, compact JSON returns `[path, lines]` tuples inside `data` instead of full source files.
-If line ranges shift, tuples include both ranges: `[path, beforeLines, afterLines]`.
-Lines are one-based and inclusive. `"3,10-12"` identifies separate ranges; `"3+"` marks a gap after line 3.
-File moves appear separately as `moves: [[from, to]]`.
-The `_tag` identifies the outcome. The `data.verification` field reports checks. Empty warnings and regressions are omitted.
-Verification entries use `[checker, scope, files, newErrors]`.
-An optional fifth number counts errors excluded from the result.
-Skipped checks return `"disabled"`, `"no-changes"`, or `"not-applicable"`.
-After applying, earlier file reads are outdated. Read changed ranges only when you need current code.
-If an editing tool requires a fresh read, follow that requirement.
-Use `--profile full --json` for complete before/after content.
-If verification finds new type errors, the command refuses `--apply` and exits with a non-zero status.
+Use `--json` for machine-readable output. Add `--profile full` for complete source content.
+The `_tag` field reports the outcome: `Preview`, `Applied`, `Refused`, `Empty`, `Result`, or `Error`.
+If verification finds new type errors, RipIDE refuses `--apply` and exits with a non-zero status.
 
 ```bash
-ripide rename useStore useAppStore --apply --profile agent --json
-# {
-#   "_tag": "Applied", "command": "rename", "base": "/project",
-#   "data": {
-#     "changes": [["src/store.ts", "12"], ["src/app.ts", "1,8"]],
-#     "verification": [["typescript", "touched", 2, 0]]
-#   }
-# }
+ripide rename useStore useAppStore --apply --json
 ```
+
+See the [JSON contract](./docs/api-contracts.md) for response fields and verification receipts.
 
 </details>
 
 ### Verify
 
-`rename`, `replace`, `move`, `delete`, and `rename-file` enable verification by default.
-They compare type errors before and after the change, then refuse `--apply` if new errors appear.
-The receipt identifies the checker, scope, checked file count, and new error count.
-Full JSON uses named check fields. Compact JSON uses the tuples shown above.
-`typescript` uses TypeScript's native language server diagnostics. `vue` uses the Vue adapter's diagnostics.
-These checks compare error diagnostics against proposed content before writing files.
-They do not run `tsc --noEmit`, a build, or tests.
-If the receipt covers your required scope, do not repeat that diagnostic check without another edit.
-Replacement defaults to project checks. Other refactors default to touched files in both the CLI and SDK.
-Use `--verify-mode project` for broader checks, including unchanged Vue consumers.
-Project verification respects file discovery ignores. Refactor globs limit edits without narrowing project verification.
-Use `--verify-mode none` to skip verification. The SDK accepts `verifyMode: 'none' | 'touched' | 'project'`.
-The boolean SDK `verify` option and CLI `--verify` / `--no-verify` flags are removed.
-CSS class renames do not run a typecheck.
+`rename`, `replace`, `move`, `delete`, and `rename-file` check for new type errors before writing.
+Replacement checks the project by default. Other refactors check touched files.
+Use `--verify-mode project` to include unchanged consumers, or `--verify-mode none` to skip checks.
+
+Verification compares TypeScript or Vue diagnostics. It does not run a build or tests.
+CSS renames do not run a typecheck. Run your project's checks after applying them.
+See [verification details](./docs/usage.md#verify) for scope and receipts.
 
 ### Profiles
 
-`--profile auto|agent|full` controls output verbosity.
-For text, `auto` uses `std-env`'s `isAgent` detection.
-Agents get compact summaries; terminals get full diffs and trees. JSON `auto` always uses compact output.
+Text output uses compact summaries in agent environments and full diffs in terminals.
+JSON output is compact by default. Use `--profile agent` or `--profile full` to choose explicitly.
 
 ### Output limits
 
-Agent pages target 4 KiB, with at most 40 displayed results.
-Some commands use smaller or larger result counts. Check their help for details.
-Use `--page-bytes 8192` for a larger page. Follow `nextOffset`, since page sizes vary.
-The target measures serialized page bytes. It does not estimate tokens.
-Each result collection has its own target. Response metadata can add bytes.
-A page retains at least one result, even when that result exceeds the target.
-Agent stdout has a separate 32 KiB ceiling for large individual results and combined collections.
-Full output has no default page target or byte ceiling. Both flags work with either profile.
-The minimum byte limit is 1024.
-Long project or artifact paths can require a larger limit to retain response metadata.
-An insufficient metadata budget refuses the operation before writes. Its error response can exceed the rejected limit.
+Limits affect displayed results. Discovery, verification, and applied changes remain complete.
+If output is incomplete, follow `nextOffset` or save complete evidence with `--json --artifact <new-file.json>`.
+The artifact path must be new.
 
-```bash
-ripide tree --profile agent --limit 10
-ripide tree --json --declarations --file src/store.ts --page-bytes 8192
-```
-
-Paging counts results. For `tree`, each result is a file unless `--declarations` is supplied.
-Use `tree --declarations` to page declarations within large files.
-The byte limit also protects against one oversized result.
-Limits change display only. Discovery, verification, and applied changes remain complete.
-
-If JSON exceeds the byte limit, `data.output._tag` is `Omitted`.
-The response preserves `_tag`, `command`, and `base` and provides recovery instructions.
-Text retains complete leading lines and reports omitted output.
-Oversized graphs return an empty graph with an omission comment.
-Stdout limits do not bound stderr logs.
-
-Use `--json --artifact <new-file.json>` to save complete evidence outside model context.
-The artifact path must be new. Artifacts have no display limit.
-If output is incomplete, inspect that artifact with `ripide page`. Keep the original command outcome and verification receipt.
-Paging saved evidence avoids another project scan. It never repeats a mutation.
+See [output limits](./docs/usage.md#output-limits) for paging options and byte ceilings.
 
 ### Read saved evidence
 
-Run the operation once, then inspect its saved evidence:
+Save the result once, then inspect it without repeating the operation:
 
 ```bash
 ripide tree --json --artifact /tmp/ripide-tree.json
 ripide page --input /tmp/ripide-tree.json
 ripide page --input /tmp/ripide-tree.json --path /files/0/declarations
-ripide page --input - --path /files/0/declarations < /tmp/ripide-tree.json
 ```
 
-Read the page at `data.view`. Its saved evidence identity appears at `data.source.sha256`.
-The root page lists scalar metadata and paths to nested collections and objects.
-Object menus also page their children. Large values expose paths and byte counts in `data.view.omittedValues`.
-If the selected value is an array, the command pages its items.
-Select paths from that menu. Artifact shapes differ between commands; the root is not always an array.
-Paths use JSON Pointer syntax. The empty path selects the root.
-Escape `/` as `~1` and `~` as `~0` inside property names.
-Each page is JSON; `--json` is unnecessary.
-Use `--input -` for a single JSON document on stdin.
-
-Pages default to 40 results, a 4 KiB page target, and a 32 KiB response ceiling.
-Use `--limit`, `--offset`, `--page-bytes`, or `--max-bytes` to adjust them.
-For arrays of objects, use `--fields name,line` to select row fields.
-Long strings page into UTF-8 text parts with source line numbers. Offsets count parts.
-For saved source, select a path such as `/changes/0/after` from the artifact menu.
-Follow `data.view.nextOffset` to continue. If one item is too large, select its nested fields or raise the ceiling.
-
-For several known requests, keep one evidence session:
-
-```bash
-ripide page --input /tmp/ripide-tree.json --session <<'NDJSON'
-{"_tag":"Select","path":"/files/0/declarations"}
-{"_tag":"Select","path":"/files/0/imports"}
-{"_tag":"Close"}
-NDJSON
-```
-
-The session loads the artifact once and keeps an immutable snapshot.
-It writes an initial page, then one JSON response per NDJSON request.
-Requests are `Next`, `Previous`, `Select`, and `Close`.
-`Select` accepts a JSON Pointer `path` and an optional `offset`.
-It resets page history and defaults to offset zero. `Previous` returns the prior visited page for that path.
-If a page includes `nextOffset`, send `Next` to continue.
-Failed navigation requests return `Error` without changing the current path or history. Correct the request, then continue.
-Session navigation uses stdin, so `--session` requires a file input.
-Use live navigation only when your shell tool keeps stdin open between requests.
-Otherwise, batch known requests or use separate `ripide page` calls. These calls reread evidence without scanning the project.
-The original mutation outcome remains authoritative. A page response only reports evidence inspection.
-If you omitted the artifact during a mutation, do not apply again just to create evidence.
-
-Reusable helpers are exported from `ripide/presentation`:
-`selectOutput` accepts `pageBytes` and an optional page renderer to fit arbitrary result collections.
-It returns `nextOffset` when another page exists.
-`renderBoundedOutput` bounds arbitrary rendered values, and `createTextOutput` bounds cumulative text writes.
-
-See [API contract migration](docs/api-contracts.md) for JSON consumers and SDK formatting imports.
+Choose paths from the page menu. Follow `data.view.nextOffset` for more results.
+See [saved evidence](./docs/usage.md#read-saved-evidence) for filters, source ranges, and sessions.
 
 ## Commands
 
