@@ -135,6 +135,39 @@ describe('registered experiments', () => {
     expect(recorded.exit._tag).toBe('TimedOut')
     expect(recorded.childLifecycle).toEqual({ _tag: 'ProvenComplete' })
   })
+  it.skipIf(process.platform !== 'linux' || !compiler)('bounds shutdown when the tracer never attaches', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'experiment-stuck-tracer-'))
+    const source = join(dir, 'freeze.c')
+    const library = join(dir, 'freeze.so')
+    const pidPath = join(dir, 'tracer.pid')
+    writeFileSync(source, '#define _GNU_SOURCE\n#include <fcntl.h>\n#include <signal.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <unistd.h>\n__attribute__((constructor)) static void freeze_tracer(void) {\n  const char* path = getenv("RIPIDE_TRACER_PID");\n  if (!path) return;\n  char comm[16];\n  int self = open("/proc/self/comm", O_RDONLY);\n  ssize_t size = read(self, comm, sizeof(comm) - 1);\n  close(self);\n  if (size <= 0) return;\n  comm[size] = 0;\n  if (strncmp(comm, "strace", 6) != 0) return;\n  FILE* output = fopen(path, "w");\n  fprintf(output, "%d", getpid());\n  fclose(output);\n  raise(SIGSTOP);\n}\n')
+    const built = spawnSync(compiler!, ['-shared', '-fPIC', '-o', library, source])
+    if (built.error || built.status)
+      throw new Error('The frozen tracer fixture could not be compiled.')
+    let rescued = false
+    const rescue = setTimeout(() => {
+      rescued = true
+      if (existsSync(pidPath)) {
+        try {
+          process.kill(Number(readFileSync(pidPath, 'utf8')), 'SIGKILL')
+        }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH')
+            throw error
+        }
+      }
+    }, 6000)
+    try {
+      const recorded = await recordCommand({ command: [process.execPath, '-e', 'process.exit(0)'], cwd: dir, directory: join(dir, 'record'), phase: 'mechanical', role: 'arm', timeoutMs: 300, tracing: 'strace', env: { ...process.env, LD_PRELOAD: library, RIPIDE_TRACER_PID: pidPath } })
+      expect(Number(readFileSync(pidPath, 'utf8'))).toBeGreaterThan(0)
+      expect(rescued).toBe(false)
+      expect(recorded.exit).toEqual({ _tag: 'TimedOut', code: null, signal: 'SIGKILL' })
+      expect(recorded.childLifecycle._tag).toBe('Unavailable')
+    }
+    finally {
+      clearTimeout(rescue)
+    }
+  })
   it('accepts an equivalent implementation only in registered behavioral files', () => {
     const dir = mkdtempSync(join(tmpdir(), 'experiment-behavior-'))
     const expected = { 'src.ts': 'export const absolute = Math.abs\n', 'notes.txt': 'preserve' }
