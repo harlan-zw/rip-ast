@@ -177,10 +177,12 @@ export async function executeExperiment(manifest: Manifest, directory: string, o
             infrastructureFailure = 'A preregistered check has incomplete command lifecycle.'
             break
           }
-          if (!commandSucceeded(record))
+          if (!commandSucceeded(record)) {
             quality = 'failed'
+            break
+          }
         }
-        for (const gate of infrastructureFailure ? [] : task.qualityGates) {
+        for (const gate of quality === 'passed' ? task.qualityGates : []) {
           const record = await dispatch(expand(gate.command), project, base, 'verification', 'controller', environment)
           checked.push(record)
           const unavailable = !commandCompleted(record) || (record.exit._tag === 'Exited' && record.exit.code === 4)

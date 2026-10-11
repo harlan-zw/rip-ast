@@ -136,6 +136,9 @@ Private evaluation evidence may retain assertion text. The evaluated project ret
 Keep reusable assertions in `.checks/assertions.txt`. Remove code helpers before recording the final green run.
 The supplied `check-behavior` command checks behavior, preservation, cleanup, and execution evidence.
 The controller also runs the registered build and typecheck commands.
+It rejects invalid evidence before build and typecheck. A failed check skips later checks and gates.
+Failed attempts retain their recorded costs. Required gates that did not run remain `NotRun`.
+After successful project checks, the final gate verifies behavior and evidence again.
 OpenCode receives a fixed session title. Evaluation does not need a separate title-model request.
 OpenCode starts in a private folder without Git metadata to avoid its project-copy startup stall.
 The evaluated Git project remains the working directory for every source edit, test, and Git command.
