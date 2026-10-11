@@ -297,6 +297,44 @@ ripide css-class-scan --by file
 </details>
 
 <details>
+<summary><b>🎨 Rename CSS custom properties</b></summary>
+
+Rename exact declarations, `@property` registrations, and `var()` references.
+Bare property references work in `transition`, `transition-property`, and `will-change` values.
+The `--` separator prevents custom property names from becoming CLI options.
+
+```bash
+ripide css-custom-property-rename -- --foo-a --theme-b
+ripide css-custom-property-rename --apply --json --artifact /tmp/css-plan.json -- --foo-a --theme-b
+```
+
+Supported sources include CSS, SCSS, Sass, Less, PostCSS, and Vue style blocks.
+JS/TS strings support exact names and CSS values, including React, Next, Solid, and Vue scripts.
+Octane TSRX uses its existing compiler opt-in.
+Static template names and literal interpolation work, even when other values remain dynamic.
+Proven string concatenations work. Folding an assembled name can remove its interpolation syntax.
+Comments, CSS quoted content, prose, module paths, and longer names stay unchanged.
+
+Dynamic names stay unchanged. Plausible matches produce warnings with file, line, column, and source.
+For example, renaming `--foo-a` flags `` `--foo-${bar}` `` for review.
+Tagged templates receive warnings. Variable bindings and function results are not evaluated.
+Static candidates nested inside unknown expressions receive source warnings. Their returned values remain unproven.
+Vue style attributes, JSX quoted style attributes, and CSS query names receive source warnings for manual review.
+Attribute matching decodes entities and preserves authored source in warnings.
+Ambiguous CSS values receive warnings, including animation names that resemble custom properties.
+Script CSS payloads require known declaration or function headers. Inspect new or nonstandard headers separately.
+Svelte markup, Stylus, and arbitrary CSS identifier punctuation are unsupported.
+Names accept `--` followed by letters, digits, underscores, hyphens, or Unicode characters.
+CSS identifier escapes and JS string escapes are decoded before matching.
+
+Dry runs preserve files. `--apply` uses the existing atomic write boundary.
+Verification reports `not-applicable`; this transform does not run a typecheck or compile styles.
+Run the project's checks after applying. Output limits preserve complete warnings in `--artifact` evidence.
+Results include `limitations`, even when no source warning exists. Inspect runtime producers and files outside the glob separately.
+
+</details>
+
+<details>
 <summary><b>🌳 Print a project declaration tree</b></summary>
 
 List declarations by file. Use `--exports exported` for exports or `--exports local` for declarations without exports.
@@ -502,6 +540,7 @@ See [API contract migration](docs/api-contracts.md) for JSON consumers and SDK f
 | `ripide delete <symbol> --from <file>` | Delete an unused top-level declaration; refuses if references remain. |
 | `ripide rename-file <old> <new>` | Rename a file and rewrite every import site (including `.vue` consumers). |
 | `ripide css-class-rename <from> <to> \| --map <file.json>` | Rename tailwind/CSS utility class tokens repo-wide. |
+| `ripide css-custom-property-rename -- <from> <to>` | Rename exact custom properties. Review dynamic warnings. |
 | `ripide css-class-scan` | List class tokens; use `--sort count-asc` for rare tokens or `--by file` for files with the most unique classes. |
 
 Run `ripide --help` for all commands, or `ripide <command> --help` for its options.
@@ -556,9 +595,8 @@ Instances belong to the caller. Independent CLI processes do not share this cach
 
 ## Limitations
 
-**CSS custom properties.** CSS class migration handles class tokens and `@apply`.
-It does not rename custom properties such as `--foo-a` in CSS, JavaScript, or Vue styles.
-It does not report dynamic variable candidates such as `` `--foo-${bar}` ``.
+**CSS custom properties.** Use `css-custom-property-rename` for declarations, `var()` references, and static JS/TS strings.
+Review source warnings and result `limitations`. Opaque runtime names require a separate search and project checks.
 
 **Scoping with `--glob`.** Pass comma-separated patterns. Prefix a pattern with `!` to exclude matching files:
 

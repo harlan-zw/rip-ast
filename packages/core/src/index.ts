@@ -6,6 +6,8 @@ export { rewriteClassString, rewriteToken, runCssClassRename } from './css-class
 export type { CssClassRenameOptions, CssClassRenameResult, RenameMap } from './css-class-rename.ts'
 export { runCssClassFileScan, runCssClassScan } from './css-class-scan.ts'
 export type { CssClassFileScanHit, CssClassFileScanOptions, CssClassScanHit, CssClassScanOptions } from './css-class-scan.ts'
+export { runCssCustomPropertyRename } from './css-custom-property-rename.ts'
+export type { CssCustomPropertyRegion, CssCustomPropertyRenameOptions, CssCustomPropertyRenameResult } from './css-custom-property-rename.ts'
 export { runDelete } from './delete.ts'
 export type { DeleteOptions, DeleteReference, DeleteResult } from './delete.ts'
 export { buildDoctorFixes, getChangedFiles, getDoctorCheckNames, runDoctor } from './doctor.ts'

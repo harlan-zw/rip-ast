@@ -1,6 +1,6 @@
 ---
 name: ripast
-description: "AST refactors: renames, moves, imports, and CSS classes in TS/JS/Vue."
+description: "AST refactors: renames, moves, imports, CSS classes, and CSS custom properties in TS/JS/Vue."
 license: MIT
 compatibility: "Requires the ripide CLI, Node.js 22.13+, and shell access to the target project."
 ---
@@ -37,6 +37,7 @@ Common commands, run only the requested operation and append its supplied check:
 ripide rename useStore useAppStore --scope src/store.ts --apply --profile agent
 ripide rename-file src/store.ts src/app-store.ts --apply --profile agent
 ripide css-class-rename font-semibold font-medium --apply --profile agent
+ripide css-custom-property-rename --apply --profile agent -- --foo-a --theme-b
 ```
 
 Operation flags `--artifact`, `--fields`, and `--minify` require `--json`.
@@ -66,6 +67,10 @@ Read [saved evidence](references/paging.md) for path selection and session reque
 
 Batch known commands. An exact CSS mapping needs no `css-class-scan`.
 CSS and template transforms have no type verification; run their project checks.
+For CSS custom properties, read [supported cases and limits](references/css-custom-properties.md).
+Review source warnings and result `limitations` before apply.
+Warnings include nested static candidates, ambiguous CSS values, and encoded style attributes. Prove their meaning before editing.
+Save complete warnings with `--json --artifact <new-file.json>`. Use the reference's agent review procedure for skipped sites.
 If no files changed, resolve the target, root, or configuration before retrying.
 If diagnostics increased, inspect the cause. Never disable verification to force success.
 Inspect more files only when results expose uncertainty. Repeat a successful check only after another edit or new failure.

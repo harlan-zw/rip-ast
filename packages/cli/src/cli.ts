@@ -23,6 +23,7 @@ import {
   runCssClassFileScan,
   runCssClassRename,
   runCssClassScan,
+  runCssCustomPropertyRename,
   runDoctor,
   scan,
   writeChanges,
@@ -553,6 +554,7 @@ interface MutatingResult {
   verification: Verification
   regressions: { file: string, line: number, col: number, code: number, message: string }[]
   warnings?: string[]
+  limitations?: string[]
 }
 
 function compactMutationResult(r: MutatingResult, manifest = buildChangeManifest(r.changes), args: OutputArgs = {}) {
@@ -561,16 +563,29 @@ function compactMutationResult(r: MutatingResult, manifest = buildChangeManifest
   return {
     verification: compactVerification(r.verification),
     ...(r.regressions.length ? { regressions, diagnosticPage } : {}),
-    ...(r.warnings?.length ? { warnings: r.warnings } : {}),
+    ...(r.warnings?.length ? mutationWarnings(r, args, true) : {}),
+    ...(r.limitations ? { limitations: r.limitations } : {}),
     ...manifest,
     changes,
     changePage,
   }
 }
 
+function mutationWarnings(r: MutatingResult, args: OutputArgs, compact: boolean) {
+  if (args.command !== 'css-custom-property-rename')
+    return { warnings: r.warnings ?? [], warningPage: undefined }
+  if (!r.warnings?.length)
+    return {}
+  const maxBytes = parseOutputBytes(args['max-bytes'], compact)
+  const { results: warnings, ...warningPage } = selectOutput(r.warnings, {
+    ...selection(args, compact),
+    pageBytes: maxBytes === undefined ? parsePageBytes(args['page-bytes'], compact) : Math.max(1024, Math.min(parsePageBytes(args['page-bytes'], compact) ?? maxBytes, Math.floor(maxBytes / 3))),
+  }, warning => warning.split(':')[0])
+  return { warnings, warningPage }
+}
+
 function emitResult(r: MutatingResult, apply: boolean, json: boolean = false, agentProfile: boolean = false, args: OutputArgs = {}): void {
   const s = summarize(r.changes)
-  const warnings = r.warnings ?? []
   if (json) {
     const blockedByRegression = apply && r.regressions.length > 0
     const wrote = apply && !blockedByRegression
@@ -584,7 +599,8 @@ function emitResult(r: MutatingResult, apply: boolean, json: boolean = false, ag
           summary: s,
           verification: r.verification,
           regressions: diagnostics(r, args, false).results,
-          warnings,
+          ...mutationWarnings(r, args, false),
+          ...(r.limitations ? { limitations: r.limitations } : {}),
           changes: selectOutput(r.changes, selection(args, false), c => c.rel).results.map(c => ({ path: c.rel, absolutePath: c.path, before: c.before, after: c.after })),
           changePage: (() => {
             const { results, ...page } = selectOutput(r.changes, selection(args, false), c => c.rel)
@@ -597,8 +613,16 @@ function emitResult(r: MutatingResult, apply: boolean, json: boolean = false, ag
       process.exitCode = 1
     return
   }
-  for (const w of warnings)
-    process.stderr.write(`warning: ${w}\n`)
+  const warningOutput = mutationWarnings(r, args, agentProfile)
+  for (const limitation of r.limitations ?? [])
+    writeText(args, `limitation: ${limitation}\n`)
+  for (const w of warningOutput.warnings ?? []) {
+    if (args.command === 'css-custom-property-rename')
+      writeText(args, `warning: ${w}\n`)
+    else process.stderr.write(`warning: ${w}\n`)
+  }
+  if (warningOutput.warningPage?.omitted)
+    writeText(args, `${formatOutputPage(warningOutput.warningPage)}\n`)
   if (agentProfile) {
     const blockedByRegression = apply && r.regressions.length > 0
     writeText(args, `${profileHeader()}\n`)
@@ -793,6 +817,27 @@ const cssClassRenameCmd = defineCommand({
       glob: args.glob ? splitGlobs(args.glob as string) : undefined,
     })
     emitResult(r, !!args.apply, !!args.json, resolveProfile(args.profile, !!args.json).agentProfile, args)
+  },
+})
+
+const cssCustomPropertyRenameCmd = defineCommand({
+  meta: { name: 'css-custom-property-rename', description: 'Rename exact CSS custom properties in styles and static JS/TS strings. Includes transition and will-change references. Review dynamic candidates, ambiguous values, encoded attributes, and result limitations. No typecheck verification.' },
+  args: {
+    from: { type: 'positional', required: true, description: 'Old custom property. Place names after --.' },
+    to: { type: 'positional', required: true, description: 'New custom property. Example: -- --foo-a --theme-b.' },
+    glob: globArg,
+    apply: applyArg,
+    profile: profileArg,
+    ...outputArgs,
+    json: jsonArg,
+  },
+  async run({ args }) {
+    const sdk = await createCliEngine(process.cwd(), args.vue !== false)
+    const result = await runCssCustomPropertyRename(new Map([[String(args.from), String(args.to)]]), {
+      engine: sdk.services,
+      glob: args.glob ? splitGlobs(args.glob as string) : undefined,
+    })
+    emitResult(result, !!args.apply, !!args.json, resolveProfile(args.profile, !!args.json).agentProfile, args)
   },
 })
 
@@ -1323,6 +1368,7 @@ const command = defineCommand({
     'delete': deleteCmd,
     'components': componentsCmd,
     'css-class-rename': cssClassRenameCmd,
+    'css-custom-property-rename': cssCustomPropertyRenameCmd,
     'css-class-scan': cssClassScanCmd,
     'vue-template-wrap': vueTemplateWrapCmd,
     'vue-template-unwrap': vueTemplateUnwrapCmd,
@@ -1388,7 +1434,7 @@ export async function runCli(rawArgs: string[], ensureAdapters?: (needed: readon
               ? [recoverSmushedPair(context.args.old as string, context.args.new as string).new]
               : name === 'move' ? [context.args.to as string] : []
             rejectArtifactCollision(context.args, destinations)
-            const needsAdapter = ['rename', 'move', 'rename-file', 'replace', 'delete', 'doctor', 'components', 'scan', 'tree', 'unused', 'css-class-scan', 'css-class-rename', 'vue-template-wrap', 'vue-template-unwrap'].includes(name)
+            const needsAdapter = ['rename', 'move', 'rename-file', 'replace', 'delete', 'doctor', 'components', 'scan', 'tree', 'unused', 'css-class-scan', 'css-class-rename', 'css-custom-property-rename', 'vue-template-wrap', 'vue-template-unwrap'].includes(name)
             if (needsAdapter && context.args.vue !== false && ensureAdapters && await ensureAdapters(discoverCliAdapters().adapters))
               return
             return await selected.run?.(context)

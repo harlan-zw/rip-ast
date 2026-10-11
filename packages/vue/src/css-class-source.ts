@@ -1,3 +1,4 @@
+import type { CssCustomPropertyRegion } from 'ripide-api'
 import type { CssClassSourceFile, RenameMap } from 'ripide-api/adapter'
 import { parse as parseSfc } from '@vue/compiler-sfc'
 import { parseSync } from 'oxc-parser'
@@ -5,6 +6,43 @@ import { applyTextEdits, cssSyntax, encodeAttributeValue, mapIncludesAny, parseF
 import { parseAuthoredSource } from './source.ts'
 
 const CLASS_EXPRESSION_PREFIX = 'cn('
+export function vueCssCustomPropertyRegions(file: CssClassSourceFile): CssCustomPropertyRegion[] {
+  const { descriptor, errors } = parseSfc(file.source, { filename: file.abs })
+  // The compiler reports a missing template for valid style-only sources.
+  const structuralErrors = errors.filter(error => !String(error).startsWith('SyntaxError: At least one <template> or <script> is required'))
+  if (structuralErrors.length)
+    throw new Error(`Cannot inspect Vue CSS custom properties in ${file.rel}: ${structuralErrors.map(String).join('; ')}`)
+  const scripts = [descriptor.script, descriptor.scriptSetup].filter(block => block !== null).filter(block => !block.src)
+  for (const block of scripts) {
+    if (block.lang && !['ts', 'tsx', 'js', 'jsx'].includes(block.lang))
+      throw new Error(`Cannot inspect the script language in ${file.rel}.`)
+  }
+  for (const block of descriptor.styles) {
+    if (block.lang && !['css', 'scss', 'sass', 'less', 'postcss', 'pcss'].includes(block.lang))
+      throw new Error(`Cannot inspect the style language in ${file.rel}.`)
+  }
+  const attributes: CssCustomPropertyRegion[] = []
+  function visitStyles(node: any): void {
+    for (const prop of node.props ?? []) {
+      const boundStyle = prop.type === 7 && prop.name === 'bind' && prop.arg?.isStatic && prop.arg.content === 'style'
+      const value = prop.type === 6 && prop.name === 'style' ? prop.value : boundStyle ? prop.exp : undefined
+      if (value) {
+        // Use authored bytes. HTML entities need a separate encoding-aware refactor.
+        const raw = value.loc.source
+        const quoted = prop.type === 6 && (raw.startsWith('"') || raw.startsWith('\''))
+        attributes.push({ _tag: 'Review', source: quoted ? raw.slice(1, -1) : raw, value: value.content, start: value.loc.start.offset + Number(quoted), syntax: boundStyle ? 'Script' : 'Css', reason: 'Vue style attribute requires manual review' })
+      }
+    }
+    for (const child of node.children ?? []) visitStyles(child)
+  }
+  if (descriptor.template?.ast)
+    visitStyles(descriptor.template.ast)
+  return [
+    ...scripts.map(block => ({ _tag: 'Script' as const, source: block.content, start: block.loc.start.offset, filename: `${file.abs}.${block.lang ?? 'js'}` })),
+    ...descriptor.styles.filter(block => !block.src).map(block => ({ _tag: 'Css' as const, source: block.content, start: block.loc.start.offset, lang: block.lang ?? 'css' })),
+    ...attributes,
+  ]
+}
 export { rewriteVue as rewriteVueCssClassTokens }
 export function visitVueCssClassTokens(file: CssClassSourceFile, visit: (bare: string) => void): void {
   visitVue(file, text => visitClassTokens(text, visit))

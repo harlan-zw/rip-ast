@@ -14,7 +14,7 @@ import {
 import { parseComponent, parseComponentSource } from './component-parse.ts'
 import { findComponentUsage, findComponentUsages } from './component-usages.ts'
 import { listComponents } from './components.ts'
-import { rewriteVueCssClassTokens, visitVueCssClassTokens } from './css-class-source.ts'
+import { rewriteVueCssClassTokens, visitVueCssClassTokens, vueCssCustomPropertyRegions } from './css-class-source.ts'
 import { doctor } from './doctor.ts'
 import { finalizeVueFileRename } from './finalize-rename.ts'
 import { loadNuxtProviderPaths, nuxtConsumerContext } from './nuxt-bindings.ts'
@@ -77,6 +77,7 @@ void findComponentUsage
 export function createVueExtension(): Extension {
   return {
     css: { visit: visitVueCssClassTokens, rewrite: rewriteVueCssClassTokens },
+    cssCustomProperties: vueCssCustomPropertyRegions,
     configPaths: ['.nuxt/tsconfig.json', '.nuxt/tsconfig.app.json', '.nuxt/tsconfig.server.json', '.nuxt/tsconfig.shared.json', '.nuxt/tsconfig.node.json'],
     name: 'vue',
     suffixes: ['.vue'],
