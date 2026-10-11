@@ -11,6 +11,40 @@ function run(cwd: string, args: string[], input?: string) {
   return spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', cli, ...args], { cwd, encoding: 'utf8', input })
 }
 
+it('navigates an object menu with its returned CLI instruction', () => {
+  const fixture = makeFixture({ 'evidence.json': '{"result":{"counts":{"passed":14}}}' })
+  try {
+    const menu = run(fixture.dir, ['page', '--input', 'evidence.json'])
+    assert.equal(menu.status, 0, menu.stderr)
+    const response = JSON.parse(menu.stdout).data
+    const option = response.usage?.match(/--[a-z]+/)?.[0]
+    assert.ok(option, 'Return the selection option with the object menu.')
+    const selected = run(fixture.dir, ['page', '--input', 'evidence.json', option, response.view.objects[0]])
+    assert.equal(selected.status, 0, selected.stderr)
+    const counts = run(fixture.dir, ['page', '--input', 'evidence.json', option, JSON.parse(selected.stdout).data.view.objects[0]])
+    assert.equal(counts.status, 0, counts.stderr)
+    assert.deepEqual(JSON.parse(counts.stdout).data.view.values, { passed: 14 })
+  }
+  finally { fixture.cleanup() }
+})
+
+it('navigates a session menu with its returned JSON request', () => {
+  const fixture = makeFixture({ 'evidence.json': '{"counts":{"passed":14}}' })
+  try {
+    const menu = run(fixture.dir, ['page', '--input', 'evidence.json', '--session'], '{"_tag":"Close"}\n')
+    assert.equal(menu.status, 0, menu.stderr)
+    const response = JSON.parse(menu.stdout.split('\n')[0]).data
+    const example = response.usage?.match(/\{.*\}/)?.[0]
+    assert.ok(example, 'Return the selection request with the session menu.')
+    const request = { ...JSON.parse(example), path: response.view.objects[0] }
+    const selected = run(fixture.dir, ['page', '--input', 'evidence.json', '--session'], `${JSON.stringify(request)}\n{"_tag":"Close"}\n`)
+    assert.equal(selected.status, 0, selected.stderr)
+    const responses = selected.stdout.trim().split('\n').map(line => JSON.parse(line))
+    assert.deepEqual(responses[1].data.view.values, { passed: 14 })
+  }
+  finally { fixture.cleanup() }
+})
+
 it.each(['--no-json', '--json=false'])('page keeps JSON field selection with %s', (option) => {
   const result = run(process.cwd(), ['page', '--input', '-', '--fields', 'id', option], '[{"id":1,"body":"large"}]')
   assert.equal(result.status, 0, result.stderr)

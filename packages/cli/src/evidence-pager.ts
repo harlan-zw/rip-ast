@@ -96,6 +96,13 @@ export async function runEvidencePager(options: EvidencePagerOptions, dependenci
     return { _tag: 'Refused' }
   }
   const source = { input: options.input, sha256: createHash('sha256').update(text).digest('hex') }
+  const present = (view: EvidenceInspection) => ({
+    source,
+    view,
+    ...(view._tag === 'Object'
+      ? { usage: options.session ? 'Send {"_tag":"Select","path":"<JSON Pointer>"} to select a path.' : 'Select a JSON Pointer with --path.' }
+      : {}),
+  })
   let state = { path: options.path, offset: options.offset, history: [] as number[] }
   let current: EvidenceInspection | undefined
   const inspect = (path: string, offset: number): boolean => {
@@ -105,9 +112,9 @@ export async function runEvidencePager(options: EvidencePagerOptions, dependenci
       pageBytes: options.pageBytes,
       render: (view) => {
         if (view._tag !== 'Collection')
-          return dependencies.render({ source, view })
+          return dependencies.render(present(view))
         const selected = selectFields(view, options.fields)
-        return dependencies.render(selected._tag === 'Err' ? { source, message: selected.message } : { source, view: { ...view, ...selected.value } })
+        return dependencies.render(selected._tag === 'Err' ? { source, message: selected.message } : present({ ...view, ...selected.value }))
       },
     })
     if (result._tag === 'Err') {
@@ -125,7 +132,7 @@ export async function runEvidencePager(options: EvidencePagerOptions, dependenci
     else {
       current = result.value
     }
-    dependencies.emit({ source, view: current })
+    dependencies.emit(present(current))
     return true
   }
   if (!inspect(state.path, state.offset))

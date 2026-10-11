@@ -284,6 +284,7 @@ ripide css-custom-property-rename --apply -- --foo-a --theme-b
 ```
 
 Dynamic names stay unchanged. Review warnings and result `limitations`, then run your project's checks after applying.
+Value-only strings such as `"--foo-a 1s"` stay unchanged and receive source warnings for review.
 This command does not typecheck or compile styles.
 See the [Usage reference](./docs/usage.md#what-can-ripide-do) for supported sources and warning examples.
 

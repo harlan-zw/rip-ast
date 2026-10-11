@@ -25,6 +25,9 @@ Script declaration strings require known CSS property headers or custom property
 The known property list comes from TypeScript 6.0.3 DOM metadata.
 CSS function strings require recognised function headers, including `var()`, `calc()`, colours, and gradients.
 Unknown headers stay unchanged. Inspect these strings separately when the project uses new or nonstandard CSS.
+Value-only strings beginning with custom property names stay unchanged and receive warnings for plausible matches.
+Examples include `"--foo-a 1s"`, `"--other, --foo-a"`, and `` `--foo-${suffix} 1s` ``.
+The CSS property is unknown. These names could identify animations or unrelated data.
 
 Comments, CSS quoted content, module paths, prose, markup samples, and longer names stay unchanged.
 Names accept `--` followed by identifier characters: letters, digits, underscores, hyphens, and Unicode characters.
@@ -67,7 +70,9 @@ Agent review procedure:
 
 1. Save a dry-run artifact. Read every warning, including omitted warning pages.
 2. Use each warning's file, location, and source to inspect the runtime value.
-3. Inspect nested function arguments and ambiguous CSS identifiers before choosing which consumer to change.
+3. Inspect nested function arguments, value-only strings, and ambiguous CSS identifiers before choosing which consumer to change.
+   If a value-only string belongs to `transition-property`, update the exact name and test that style consumer.
+   If it names an animation or unrelated data, keep it unchanged.
 4. If the value is provable, edit that consumer with the project's existing APIs and preserve its encoding.
 5. If the value remains dynamic, update its producer or naming map and test the affected runtime path.
 6. Inspect excluded files, external blocks, unsupported languages, unknown CSS headers, and opaque runtime producers separately.

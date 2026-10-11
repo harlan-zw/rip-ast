@@ -821,7 +821,7 @@ const cssClassRenameCmd = defineCommand({
 })
 
 const cssCustomPropertyRenameCmd = defineCommand({
-  meta: { name: 'css-custom-property-rename', description: 'Rename exact CSS custom properties in styles and static JS/TS strings. Includes transition and will-change references. Review dynamic candidates, ambiguous values, encoded attributes, and result limitations. No typecheck verification.' },
+  meta: { name: 'css-custom-property-rename', description: 'Rename exact CSS custom properties in styles and static JS/TS strings. Includes transition and will-change references. Review dynamic candidates, value-only strings, ambiguous values, encoded attributes, and result limitations. No typecheck verification.' },
   args: {
     from: { type: 'positional', required: true, description: 'Old custom property. Place names after --.' },
     to: { type: 'positional', required: true, description: 'New custom property. Example: -- --foo-a --theme-b.' },
