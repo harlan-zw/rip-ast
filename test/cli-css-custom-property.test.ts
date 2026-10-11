@@ -15,9 +15,10 @@ function run(cwd: string, args: string[]) {
 it.each(['TypeScript', 'React', 'Next', 'Solid', 'Vue', 'Nuxt', 'Octane'])('previews and applies custom properties through the CLI in %s', (framework) => {
   const vue = ['Vue', 'Nuxt'].includes(framework)
   const filename = vue ? 'View.vue' : framework === 'Octane' ? 'View.tsrx' : framework === 'TypeScript' ? 'view.ts' : 'view.tsx'
-  const templates = 'const template = `--foo-${"a"}`; const uncertain = `--foo-${suffix}`; const wrapped = (`--foo-${wrappedSuffix}`) + "";'
+  const templates = 'const template = `--foo-${"a"}`; const uncertain = `--foo-${suffix}`; const wrapped = (`--foo-${wrappedSuffix}`) + ""; const nested = `var(${name("--foo-a")})`; const prose = "Note: use var(--foo-a) here"; const transition = "transition-property: --foo-a";'
   const bindings = `export const key = "--foo-a"; export const style = { "--foo-a": "red", color: "var(--foo-a)" }; ${templates}`
-  const source = vue ? `<script setup>const key = "--foo-a"; ${templates}</script><style>.x { --foo-a: red; color: var(--foo-a) }</style>` : framework === 'Octane' ? `${bindings}\nexport function View() @{ <div style={style} /> }` : framework === 'TypeScript' ? bindings : `${bindings}\nexport const View = () => <div style={{ "--foo-a": "red", color: "var(--foo-a)" }} />;`
+  const jsx = ['React', 'Next', 'Solid'].includes(framework)
+  const source = vue ? `<script setup>const key = "--foo-a"; ${templates}</script><style>.x { --foo-a: red; color: var(--foo-a) }</style>` : framework === 'Octane' ? `${bindings}\nexport function View() @{ <div style={style} /> }` : framework === 'TypeScript' ? bindings : `${bindings}\nexport const View = () => <div style={{ "--foo-a": "red", color: "var(--foo-a)" }} />; export const Quoted = () => <Box style="color: var(--foo&#45;a)" />;`
   const dependency = { TypeScript: 'typescript', React: 'react', Next: 'next', Solid: 'solid-js', Vue: 'vue', Nuxt: 'nuxt', Octane: 'octane' }[framework]!
   const fx = makeFixture({ [filename]: source, 'package.json': JSON.stringify({ dependencies: { [dependency]: '*' } }) }, false)
   try {
@@ -31,11 +32,14 @@ it.each(['TypeScript', 'React', 'Next', 'Solid', 'Vue', 'Nuxt', 'Octane'])('prev
       const payload = JSON.parse(result.stdout)
       expect(payload._tag).toBe(apply ? 'Applied' : 'Preview')
       expect(payload.data.verification).toBeDefined()
-      expect(payload.data.warnings).toHaveLength(2)
+      expect(payload.data.warnings).toHaveLength(jsx ? 4 : 3)
       expect(payload.data.warnings[0]).toContain('`--foo-${suffix}`')
       expect(payload.data.warnings[1]).toContain('`--foo-${wrappedSuffix}`')
+      expect(payload.data.warnings[2]).toContain('`var(${name("--foo-a")})`')
+      if (jsx)
+        expect(payload.data.warnings[3]).toContain('style="color: var(--foo&#45;a)"')
       expect(payload.data.limitations).toBeDefined()
-      expect(readFileSync(`${fx.dir}/${filename}`, 'utf8')).toBe(apply ? source.replaceAll('--foo-a', '--theme-b').replace('`--foo-${"a"}`', '`--theme-b`') : source)
+      expect(readFileSync(`${fx.dir}/${filename}`, 'utf8')).toBe(apply ? source.replaceAll('--foo-a', '--theme-b').replace('`--foo-${"a"}`', '`--theme-b`').replace('name("--theme-b")', 'name("--foo-a")').replace('Note: use var(--theme-b) here', 'Note: use var(--foo-a) here') : source)
     }
   }
   finally { fx.cleanup() }
@@ -56,7 +60,7 @@ it('documents the separator and refuses invalid custom property names before app
 })
 
 it('keeps dynamic warnings in bounded JSON and complete artifacts', () => {
-  const source = Array.from({ length: 60 }, (_, index) => `const p${index} = \`--foo-\${bar${index}}\`;`).join('\n')
+  const source = Array.from({ length: 60 }, (_, index) => index % 2 ? `const p${index} = \`var(\${name("--foo-a")})\`;` : `const p${index} = \`--foo-\${bar${index}}\`;`).join('\n')
   const fx = makeFixture({ 'source.ts': source }, false)
   try {
     const result = run(fx.dir, ['--json', '--max-bytes', '2048', '--artifact', 'evidence.json', '--', '--foo-a', '--theme-b'])
@@ -67,6 +71,7 @@ it('keeps dynamic warnings in bounded JSON and complete artifacts', () => {
     expect(result.stdout).toContain('Variable bindings')
     const artifact = JSON.parse(readFileSync(`${fx.dir}/evidence.json`, 'utf8'))
     expect(JSON.stringify(artifact)).toContain('source.ts:60:')
+    expect(JSON.stringify(artifact)).toContain('Unknown expression contains a CSS custom property candidate')
     expect(JSON.stringify(artifact)).toContain('Variable bindings')
     const page = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', cli, 'page', '--input', 'evidence.json', '--path', '/warnings', '--offset', '59', '--limit', '1'], { cwd: fx.dir, encoding: 'utf8' })
     expect(page.status, page.stderr).toBe(0)

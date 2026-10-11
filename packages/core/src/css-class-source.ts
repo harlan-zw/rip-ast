@@ -278,7 +278,7 @@ function walkProgram(node: any, classContext: boolean, classObjectKeyContext: bo
   }
 }
 
-function decodeJsxAttribute(value: string): string {
+export function decodeJsxAttribute(value: string): string {
   // JSX requires semicolons and HTML4 names. Numeric references do not use HTML's control-character remapping.
   return value.replace(/&(?:#(\d+)|#x([\da-fA-F]+)|[0-9a-zA-Z]+);/g, (entity: string, decimal: string | undefined, hexadecimal: string | undefined) => {
     if (decimal === undefined && hexadecimal === undefined)

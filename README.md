@@ -300,6 +300,7 @@ ripide css-class-scan --by file
 <summary><b>🎨 Rename CSS custom properties</b></summary>
 
 Rename exact declarations, `@property` registrations, and `var()` references.
+Bare property references work in `transition`, `transition-property`, and `will-change` values.
 The `--` separator prevents custom property names from becoming CLI options.
 
 ```bash
@@ -317,7 +318,11 @@ Comments, CSS quoted content, prose, module paths, and longer names stay unchang
 Dynamic names stay unchanged. Plausible matches produce warnings with file, line, column, and source.
 For example, renaming `--foo-a` flags `` `--foo-${bar}` `` for review.
 Tagged templates receive warnings. Variable bindings and function results are not evaluated.
+Static candidates nested inside unknown expressions receive source warnings. Their returned values remain unproven.
 Vue style attributes, JSX quoted style attributes, and CSS query names receive source warnings for manual review.
+Attribute matching decodes entities and preserves authored source in warnings.
+Ambiguous CSS values receive warnings, including animation names that resemble custom properties.
+Script CSS payloads require known declaration or function headers. Inspect new or nonstandard headers separately.
 Svelte markup, Stylus, and arbitrary CSS identifier punctuation are unsupported.
 Names accept `--` followed by letters, digits, underscores, hyphens, or Unicode characters.
 CSS identifier escapes and JS string escapes are decoded before matching.

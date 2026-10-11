@@ -8,6 +8,71 @@ import { makeFixture } from './helpers.ts'
 const map = new Map([['--foo-a', '--theme-b']])
 
 describe('css custom property rename', () => {
+  it('leaves colon and parenthetical prose unchanged while renaming CSS payloads', async () => {
+    const source = [
+      'const a = "Note: use var(--foo-a) here";',
+      'const b = "note: use var(--foo-a) here";',
+      'const c = "note(var(--foo-a))";',
+      'const d = "color: var(--foo-a)";',
+      'const e = "outline-color: var(--foo-a)";',
+      'const f = "calc(var(--foo-a) * 2)";',
+    ].join('\n')
+    const fx = makeFixture({ 'source.ts': source }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes[0]?.after).toBe(source.replace('color: var(--foo-a)', 'color: var(--theme-b)').replace('outline-color: var(--foo-a)', 'outline-color: var(--theme-b)').replace('calc(var(--foo-a)', 'calc(var(--theme-b)'))
+      expect(result.warnings).toEqual([])
+    }
+    finally { fx.cleanup() }
+  })
+
+  it('warns about static candidates inside unknown interpolation and concatenation operands', async () => {
+    const source = [
+      'const a = "var(" + name("--foo-a") + ")";',
+      'const b = `var(${name("--foo-a")})`;',
+      'const c = `var(${name("--other")})`;',
+      'const d = "var(" + name("use --foo-a") + ")";',
+      'const e = `var(${name(`--foo-${suffix}`)})`;',
+    ].join('\n')
+    const fx = makeFixture({ 'source.ts': source }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes).toEqual([])
+      expect(result.warnings).toHaveLength(3)
+      for (const line of [1, 2, 5])
+        expect(result.warnings.some(warning => warning.includes(`source.ts:${line}:`) && warning.includes(source.split('\n')[line - 1].slice(10, -1)))).toBe(true)
+    }
+    finally { fx.cleanup() }
+  })
+
+  it.each(['css', 'scss', 'less', 'pcss', 'postcss', 'sass'])('renames bare property references and warns about ambiguous %s values', async (ext) => {
+    const declarations = ['transition-property: --foo-a, --foo-ab', 'transition: --foo-a 1s ease', 'will-change: --foo-a', 'animation-name: --foo-a', '--alias: --foo-a', 'color: var(--foo-a)', '--data: fn(--foo-a)']
+    const source = ext === 'sass' ? `.x\n  ${declarations.join('\n  ')}\n` : `.x { ${declarations.join('; ')}; }`
+    const fx = makeFixture({ [`theme.${ext}`]: source }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes[0]?.after).toBe(source.replace('transition-property: --foo-a,', 'transition-property: --theme-b,').replace('transition: --foo-a ', 'transition: --theme-b ').replace('will-change: --foo-a', 'will-change: --theme-b').replace('var(--foo-a)', 'var(--theme-b)'))
+      expect(result.warnings).toHaveLength(3)
+      expect(result.warnings.every(warning => warning.includes(`theme.${ext}:`) && warning.includes('--foo-a'))).toBe(true)
+      expect(result.warnings.every(warning => warning.includes('Ambiguous CSS value'))).toBe(true)
+    }
+    finally { fx.cleanup() }
+  })
+
+  it('decodes numeric and named JSX style entities for authored source warnings', async () => {
+    const source = 'const view = <Box style="color: var(--foo&#45;a); --foo&#x2d;a: red" title="--foo&#45;a" />; const quoted = <Box style="content: &quot;--foo-a&quot;" />;'
+    const fx = makeFixture({ 'View.tsx': source }, false)
+    try {
+      const result = await runCssCustomPropertyRename(map, { cwd: fx.dir })
+      expect(result.changes).toEqual([])
+      expect(result.warnings).toHaveLength(1)
+      expect(result.warnings[0]).toContain('View.tsx:1:')
+      expect(result.warnings[0]).toContain('style="color: var(--foo&#45;a); --foo&#x2d;a: red"')
+      expect(result.warnings[0]).not.toContain('title=')
+    }
+    finally { fx.cleanup() }
+  })
+
   it.each(['css', 'scss', 'less', 'pcss', 'postcss', 'sass'])('renames declarations and var references in %s without touching other tokens', async (ext) => {
     const source = ext === 'sass'
       ? '.x\n  --foo-a: red\n  color: var(--foo-a)\n  --foo-ab: blue\n  content: "--foo-a"\n  // --foo-a\n'
