@@ -27,10 +27,10 @@ function defaultCssClassGlobs(engine?: EngineServices): string[] {
   return [...CODE_EXTS, ...engine?.suffixes ?? [], ...CSS_EXTS].map(e => `*${e}`)
 }
 
-export function readCssClassSourceFiles(opts: CssClassSourceOptions = {}): CssClassSourceFile[] {
+export function readCssClassSourceFiles(opts: CssClassSourceOptions = {}, additionalSuffixes: readonly string[] = []): CssClassSourceFile[] {
   const cwd = opts.cwd ?? process.cwd()
-  const glob = opts.glob ?? defaultCssClassGlobs(opts.engine)
-  return readSourceFiles(findFiles('', { cwd, glob, fixedStrings: false, listAll: true }), cwd, opts.engine)
+  const glob = opts.glob ?? [...defaultCssClassGlobs(opts.engine), ...additionalSuffixes.map(suffix => `*${suffix}`)]
+  return readSourceFiles(findFiles('', { cwd, glob, fixedStrings: false, listAll: true }), cwd, opts.engine, additionalSuffixes)
 }
 
 export function readCssClassSourceFilesForMap(map: RenameMap, opts: CssClassSourceOptions = {}): CssClassSourceFile[] {
@@ -65,10 +65,10 @@ export function rewriteCssClassTokensInFile(file: CssClassSourceFile, map: Renam
   return rewriteScript(file, map)
 }
 
-function readSourceFiles(files: string[], cwd: string, engine?: EngineServices): CssClassSourceFile[] {
+function readSourceFiles(files: string[], cwd: string, engine?: EngineServices, additionalSuffixes: readonly string[] = []): CssClassSourceFile[] {
   const out: CssClassSourceFile[] = []
   for (const abs of files) {
-    if (!isCssClassSourcePath(abs, engine))
+    if (!isCssClassSourcePath(abs, engine) && !additionalSuffixes.some(suffix => abs.endsWith(suffix)))
       continue
     const source = safeRead(abs)
     if (source == null)

@@ -3,6 +3,7 @@ import type { Program } from 'oxc-parser'
 import type { FrameworkAdapter, SourceExpression } from './adapter.ts'
 import type { CssClassSourceFile } from './css-class-source.ts'
 import type { RenameMap } from './css-class-token.ts'
+import type { CssCustomPropertyRegion } from './css-custom-property-rename.ts'
 import type { DeleteOptions } from './delete.ts'
 import type { MoveOptions } from './move.ts'
 import type { RenameFileOptions, RenameFileResult } from './rename-file.ts'
@@ -60,6 +61,7 @@ export interface Extension {
   suffixes: readonly string[]
   parse: (input: { path: string, source: string, cwd: string }) => ParsedSource
   css?: { visit: (file: CssClassSourceFile, visit: (bare: string) => void) => void, rewrite: (file: CssClassSourceFile, map: RenameMap) => string }
+  cssCustomProperties?: (file: CssClassSourceFile) => CssCustomPropertyRegion[]
   configPaths?: readonly string[]
   expressions?: (source: string) => SourceExpression[]
   /** Offset-preserving source used for import and reference inspection. */
