@@ -1,7 +1,7 @@
 import type { Manifest, Mode, Task } from './manifest.ts'
 import type { RecordedCommand } from './recorder.ts'
 import type { AttemptMetric } from './report.ts'
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { expectedProject, gradeProject, snapshotProject } from './grading.ts'
@@ -33,6 +33,7 @@ export async function executeExperiment(manifest: Manifest, directory: string, o
   const frozen = freezeManifest(manifest, directory)
   const schedule = buildSchedule(manifest)
   const records: RecordedCommand[] = []
+  const recordedArtifacts: { path: string, sha256: string }[] = []
   const attempts: AttemptMetric[] = []
   const runtimeStarted = new Date().toISOString()
   const controllerBefore = process.resourceUsage()
@@ -54,6 +55,12 @@ export async function executeExperiment(manifest: Manifest, directory: string, o
     seconds: number
     cpuSeconds: number
   }[] = []
+  const checkpoint = (active: { command: string[], cwd: string, phase: RecordedCommand['phase'], role: RecordedCommand['role'], directory: string } | null) => {
+    const temporary = join(directory, 'progress.tmp')
+    // Reference immutable command records instead of repeatedly copying their streams and load samples.
+    writeFileSync(temporary, `${JSON.stringify({ manifestHash: frozen.hash, runtimeStarted, updated: new Date().toISOString(), active, records: recordedArtifacts, attempts, qualityGates, independentGrading }, null, 2)}\n`, { mode: 0o600 })
+    renameSync(temporary, join(directory, 'progress.json'))
+  }
   const abortStudy = (reason: string): never => {
     const checkpoint = {
       _tag: 'Aborted',
@@ -80,8 +87,13 @@ export async function executeExperiment(manifest: Manifest, directory: string, o
   }
   writeFileSync(join(directory, 'schedule.json'), `${JSON.stringify(schedule, null, 2)}\n`, { flag: 'wx', mode: 0o400 })
   const dispatch = async (command: string[], cwd: string, base: string, phase: RecordedCommand['phase'], role: RecordedCommand['role'], env?: NodeJS.ProcessEnv) => {
-    const record = await recordCommand({ command, cwd, directory: join(base, `command-${records.length}`), phase, role, timeoutMs: manifest.timeoutMs, tracing: manifest.tracing, env })
+    const commandDirectory = join(base, `command-${records.length}`)
+    checkpoint({ command, cwd, phase, role, directory: commandDirectory })
+    const record = await recordCommand({ command, cwd, directory: commandDirectory, phase, role, timeoutMs: manifest.timeoutMs, tracing: manifest.tracing, env })
     records.push(record)
+    const recordPath = join(commandDirectory, 'record.json')
+    recordedArtifacts.push({ path: recordPath, sha256: sha256(readFileSync(recordPath)) })
+    checkpoint(null)
     return record
   }
   for (const command of manifest.versions) {
@@ -200,6 +212,7 @@ export async function executeExperiment(manifest: Manifest, directory: string, o
       qualityRecords.push(outcome)
       qualityGates.push(...gates.map(gate => ({ ...gate, task: task.id, mode: entry.mode, repeat: entry.repeat, attempt })))
       writeFileSync(join(base, `attempt-${attempt}.json`), `${JSON.stringify(outcome, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+      checkpoint(null)
       const parent = runner.exit._tag === 'DescendantsTerminated' ? runner.exit.parent : runner.exit
       const retainedTimeout = parent._tag === 'TimedOut' && runner.childLifecycle._tag === 'ProvenComplete' && manifest.timeoutPolicy === 'continue-study'
       if (infrastructureFailure && !retainedTimeout)

@@ -5,3 +5,4 @@ export { checkChangedVerifiedPlan, expectedProject, gradeProject, snapshotProjec
 export { buildSchedule, freezeManifest, parseManifest, random, sha256, verifyArtifacts, verifyFrozenManifest } from './manifest.ts'
 export { archiveMessage, commandSucceeded, recordCommand } from './recorder.ts'
 export { aggregateAttempts, combineUsage, pairAttempts, parseUsage, reportMarkdown } from './report.ts'
+export { startSupervisedCommand, supervisorDeadline, watchSupervisedCommand } from './supervisor.ts'
