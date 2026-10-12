@@ -45,6 +45,7 @@ else {
     writeFileSync(join(bin, name), `#!/bin/sh\nexec ${shell(process.execPath)} ${shell(wrapper)} ${shell(name)} ${shell(path)} "$@"\n`, { mode: 0o755 })
   }
   writeFileSync(join(bin, 'check-behavior'), `#!/bin/sh\nexec ${shell(process.execPath)} ${shell(fileURLToPath(new URL('./check-quality.ts', import.meta.url)))} ${shell(project)} ${shell(task)} ${shell(provenance)} ${shell(mode)} "$@"\n`, { mode: 0o755 })
+  writeFileSync(join(bin, 'check-workflow'), `#!/bin/sh\nexec ${shell(process.execPath)} ${shell(fileURLToPath(new URL('./check-workflow.ts', import.meta.url)))} "$@"\n`, { mode: 0o755 })
   const configPath = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'opencode/opencode.json')
   const provider: unknown = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')).provider : {}
   const authPath = join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local/share'), 'opencode/auth.json')
@@ -57,6 +58,9 @@ else {
     XDG_CACHE_HOME: join(home, 'cache'),
     PATH: `${bin}:${process.env.PATH}`,
     RIPIDE_EXPERIMENT_PROJECT: project,
+    RIPIDE_EXPERIMENT_TASK: task,
+    RIPIDE_EXPERIMENT_SCOPE: scope,
+    RIPIDE_EXPERIMENT_VARIANT: variant,
     RIPIDE_EXPERIMENT_TEST_PATH: join(project, scope === 'projects' ? projectContext(task).testPath : '.checks/proof.test.ts'),
     OPENCODE_DISABLE_EXTERNAL_SKILLS: '1',
     OPENCODE_DISABLE_CLAUDE_CODE: '1',
