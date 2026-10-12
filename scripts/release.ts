@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
 import { setTimeout } from 'node:timers/promises'
@@ -10,6 +10,10 @@ const folders = ['core', 'vue', 'tsrx', 'cli'] as const
 const packageNames = { core: 'ripide-api', vue: 'ripide-vue', tsrx: 'ripide-tsrx', cli: 'ripide' } as const
 interface ReleasePackage { name: string, version: string }
 interface RegistryResponse { status: number | null, stdout: string }
+interface ReleaseArtifact extends ReleasePackage { tarball: string, integrity: string }
+interface PublishedPackage { name: string, versions: string[] }
+type AutomaticRelease = { _tag: 'Skip' } | { _tag: 'Tag' | 'Retry', tag: string, sha: string }
+const versionPattern = /^v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-z-][\da-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-z-][\da-z-]*))*))?)$/i
 
 export function assertReplacementPublished(response: RegistryResponse, version: string) {
   if (response.status !== 0 || !response.stdout.trim() || JSON.parse(response.stdout) !== version)
@@ -36,7 +40,7 @@ export async function downloadPublishedPackages(pack: () => RegistryResponse, pa
 }
 
 export function planRelease(tag: string, packages: ReleasePackage[]) {
-  const match = /^v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-z-][\da-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-z-][\da-z-]*))*))?)$/i.exec(tag)
+  const match = versionPattern.exec(tag)
   if (!match)
     throw new Error('Pass a version tag, such as v0.5.0 or v0.6.0-beta.1.')
   const version = match[1]
@@ -49,7 +53,7 @@ export function planRelease(tag: string, packages: ReleasePackage[]) {
   return { version, npmTag: channel ? ['alpha', 'beta', 'rc'].includes(channel) ? channel : 'next' : 'latest' }
 }
 
-export function publicationDecision(response: RegistryResponse, integrity: string): 'publish' | 'skip' {
+function readRegistry(response: RegistryResponse): { _tag: 'Missing' } | { _tag: 'Found', value: unknown } {
   if (response.status === null || !response.stdout.trim())
     throw new Error('Registry lookup failed. Retry after checking npm connectivity.')
   const value: unknown = JSON.parse(response.stdout)
@@ -57,30 +61,169 @@ export function publicationDecision(response: RegistryResponse, integrity: strin
     if (typeof value === 'object' && value !== null && 'error' in value
       && typeof value.error === 'object' && value.error !== null
       && 'code' in value.error && value.error.code === 'E404') {
-      return 'publish'
+      return { _tag: 'Missing' }
     }
     throw new Error('Registry lookup failed. Resolve the npm error before publishing.')
   }
-  const publishedIntegrity = Array.isArray(value) && value.length === 1 ? value[0] : value
-  if (publishedIntegrity !== integrity)
+  return { _tag: 'Found', value: Array.isArray(value) && value.length === 1 ? value[0] : value }
+}
+
+export function publicationDecision(response: RegistryResponse, integrity: string): 'publish' | 'skip' {
+  const result = readRegistry(response)
+  if (result._tag === 'Missing')
+    return 'publish'
+  if (result.value !== integrity)
     throw new Error('This version contains a different artifact. Use a new version.')
   return 'skip'
 }
 
-function readPackages(cwd: string): ReleasePackage[] {
-  return folders.map((folder) => {
-    const value: unknown = JSON.parse(readFileSync(join(cwd, 'packages', folder, 'package.json'), 'utf8'))
-    if (typeof value !== 'object' || value === null || !('name' in value) || !('version' in value)
-      || typeof value.name !== 'string' || typeof value.version !== 'string') {
-      throw new Error(`Invalid package metadata: packages/${folder}/package.json.`)
-    }
-    return { name: value.name, version: value.version }
+function compareVersions(left: string, right: string): number {
+  const parse = (version: string) => {
+    const [precedence, metadata, ...extra] = version.split('+')
+    const match = versionPattern.exec(`v${precedence}`)
+    if (!match || extra.length || (metadata !== undefined && !/^[\da-z-]+(?:\.[\da-z-]+)*$/i.test(metadata)))
+      throw new Error('Invalid published version. Check npm release history before retrying.')
+    return { core: match[1].split('-')[0].split('.').map(part => BigInt(part)), prerelease: match[2]?.split('.') }
+  }
+  const a = parse(left)
+  const b = parse(right)
+  for (let i = 0; i < a.core.length; i++) {
+    if (a.core[i] !== b.core[i])
+      return a.core[i] > b.core[i] ? 1 : -1
+  }
+  if (!a.prerelease || !b.prerelease)
+    return a.prerelease ? -1 : b.prerelease ? 1 : 0
+  for (let i = 0; i < Math.max(a.prerelease.length, b.prerelease.length); i++) {
+    const x = a.prerelease[i]
+    const y = b.prerelease[i]
+    if (x === y)
+      continue
+    if (x === undefined || y === undefined)
+      return x === undefined ? -1 : 1
+    const numericX = /^\d+$/.test(x)
+    const numericY = /^\d+$/.test(y)
+    if (numericX && numericY)
+      return BigInt(x) > BigInt(y) ? 1 : -1
+    if (numericX !== numericY)
+      return numericX ? -1 : 1
+    return x > y ? 1 : -1
+  }
+  return 0
+}
+
+function requireNewerVersion(version: string, published: PublishedPackage[]) {
+  for (const pkg of published) {
+    if (pkg.versions.some(previous => previous !== version && compareVersions(version, previous) <= 0))
+      throw new Error(`The candidate must be newer than published versions of ${pkg.name}. Use a new version.`)
+  }
+}
+
+export function readPublishedVersions(packages: ReleasePackage[], lookup: (name: string) => RegistryResponse): PublishedPackage[] {
+  return packages.map(({ name }) => {
+    const result = readRegistry(lookup(name))
+    if (result._tag === 'Missing')
+      throw new Error(`If ${name} is new, register it and configure trusted publishing before retrying.`)
+    const versions = Array.isArray(result.value) ? result.value : [result.value]
+    if (!versions.length || versions.some(version => typeof version !== 'string'))
+      throw new Error(`Invalid release history for ${name}. Check npm metadata before retrying.`)
+    for (const version of versions)
+      compareVersions(version, version)
+    return { name, versions: versions as string[] }
   })
+}
+
+export function planAutomaticRelease(packages: ReleasePackage[], published: PublishedPackage[], sha: string, existingTagSha: string | null): AutomaticRelease {
+  const tag = `v${packages[0]?.version}`
+  const { version } = planRelease(tag, packages)
+  if (packages.every(pkg => published.some(release => release.name === pkg.name && release.versions.includes(version))))
+    return { _tag: 'Skip' }
+  requireNewerVersion(version, published)
+  if (existingTagSha !== null) {
+    if (existingTagSha !== sha)
+      throw new Error('This release tag points to a different commit. Use a new version.')
+    return { _tag: 'Retry', tag, sha }
+  }
+  return { _tag: 'Tag', tag, sha }
+}
+
+export function publishRelease(
+  artifacts: ReleaseArtifact[],
+  lookup: (name: string, field: 'name' | 'versions' | 'dist.integrity') => RegistryResponse,
+  publish: (artifact: ReleaseArtifact) => void,
+  report: (message: string) => void,
+) {
+  for (const { name } of artifacts) {
+    const result = readRegistry(lookup(name, 'name'))
+    if (result._tag === 'Missing')
+      throw new Error(`If ${name} is new, register it and configure trusted publishing before retrying.`)
+    if (result.value !== name)
+      throw new Error(`Registry metadata differs for ${name}. Check the package registration before retrying.`)
+  }
+  requireNewerVersion(artifacts[0].version, readPublishedVersions(artifacts, name => lookup(name, 'versions')))
+  const decisions = artifacts.map(artifact => ({ artifact, decision: publicationDecision(lookup(`${artifact.name}@${artifact.version}`, 'dist.integrity'), artifact.integrity) }))
+  for (const { artifact, decision } of decisions) {
+    if (decision === 'skip')
+      report(`${artifact.name}@${artifact.version} already contains this artifact.`)
+    else
+      publish(artifact)
+  }
+}
+
+function git(args: string[]) {
+  const response = spawnSync('git', args, { encoding: 'utf8' })
+  if (response.error)
+    throw response.error
+  if (response.status !== 0)
+    throw new Error(`Git command failed: git ${args.join(' ')}. ${response.stderr.trim()}`)
+  return response.stdout.trim()
+}
+
+function prepareRelease(packages: ReleasePackage[]) {
+  const sha = git(['rev-parse', 'HEAD'])
+  const candidate = `v${packages[0].version}`
+  planRelease(candidate, packages)
+  const refs = git(['tag', '--list', candidate])
+  const existingTagSha = refs ? git(['rev-parse', `refs/tags/${candidate}^{commit}`]) : null
+  const published = readPublishedVersions(packages, (name) => {
+    const response = spawnSync('npm', ['view', name, 'versions', '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' })
+    if (response.error)
+      throw response.error
+    if (response.stderr)
+      process.stderr.write(response.stderr)
+    return response
+  })
+  const release = planAutomaticRelease(packages, published, sha, existingTagSha)
+  if (release._tag === 'Skip') {
+    process.stdout.write('No new release tag is required.\n')
+    return
+  }
+  const output = `tag=${release.tag}\nsha=${release.sha}\ncreateTag=${release._tag === 'Tag'}\n`
+  process.stdout.write(output)
+  if (process.env.GITHUB_OUTPUT)
+    appendFileSync(process.env.GITHUB_OUTPUT, output)
+}
+
+function parsePackage(contents: string): ReleasePackage {
+  const value: unknown = JSON.parse(contents)
+  if (typeof value !== 'object' || value === null || !('name' in value) || !('version' in value)
+    || typeof value.name !== 'string' || typeof value.version !== 'string') {
+    throw new Error('Invalid package metadata. Provide a package name and version.')
+  }
+  return { name: value.name, version: value.version }
+}
+
+function readPackages(cwd: string): ReleasePackage[] {
+  return folders.map(folder => parsePackage(readFileSync(join(cwd, 'packages', folder, 'package.json'), 'utf8')))
 }
 
 async function run() {
   const [command, tag = '', directory] = process.argv.slice(2)
-  const plan = planRelease(tag, readPackages(process.cwd()))
+  const packages = readPackages(process.cwd())
+  if (command === 'prepare') {
+    prepareRelease(packages)
+    return
+  }
+  const plan = planRelease(tag, packages)
   if (command === 'plan') {
     process.stdout.write(`version=${plan.version}\nnpmTag=${plan.npmTag}\n`)
     return
@@ -126,22 +269,20 @@ async function run() {
     const name = packageNames[folder]
     const tarball = join(directory, `${name.replace(/^@/, '').replace('/', '-')}-${plan.version}.tgz`)
     const integrity = `sha512-${createHash('sha512').update(readFileSync(tarball)).digest('base64')}`
-    const response = spawnSync(process.execPath, [npm, 'view', `${name}@${plan.version}`, 'dist.integrity', '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' })
+    return { name, version: plan.version, tarball, integrity }
+  })
+  publishRelease(artifacts, (name, field) => {
+    const response = spawnSync(process.execPath, [npm, 'view', name, field, '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' })
     if (response.error)
       throw response.error
-    return { name, tarball, decision: publicationDecision(response, integrity) }
-  })
-  for (const { name, tarball, decision } of artifacts) {
-    if (decision === 'skip') {
-      process.stdout.write(`${name}@${plan.version} already contains this artifact.\n`)
-      continue
-    }
+    return response
+  }, ({ name, tarball }) => {
     const published = spawnSync(process.execPath, [npm, 'publish', tarball, '--access=public', `--tag=${plan.npmTag}`, '--registry=https://registry.npmjs.org'], { stdio: 'inherit' })
     if (published.error)
       throw published.error
     if (published.status !== 0)
       throw new Error(`Publication failed for ${name}. Retry this release after resolving the npm error.`)
-  }
+  }, message => process.stdout.write(`${message}\n`))
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
