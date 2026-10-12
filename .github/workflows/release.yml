@@ -19,6 +19,7 @@ permissions:
 
 concurrency:
   group: npm-release
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -49,7 +50,7 @@ jobs:
         id: release
         run: node --experimental-strip-types scripts/release.ts prepare
       - name: Create release tag
-        if: steps.release.outputs.tag != ''
+        if: steps.release.outputs.createTag == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}

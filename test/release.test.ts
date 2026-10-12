@@ -1,32 +1,94 @@
 import { describe, expect, it } from 'vitest'
-import { assertReplacementPublished, downloadPublishedPackages, planAutomaticRelease, planRelease, publicationDecision, publishRelease } from '../scripts/release.ts'
+import { assertReplacementPublished, downloadPublishedPackages, planAutomaticRelease, planRelease, publicationDecision, publishRelease, readPublishedVersions } from '../scripts/release.ts'
 
 const packages = ['ripide-api', 'ripide-vue', 'ripide-tsrx', 'ripide'].map(name => ({ name, version: '0.5.0' }))
 
 describe('automatic release', () => {
+  const history = (versions: string[]) => packages.map(pkg => ({ name: pkg.name, versions: [...versions] }))
+
   it('tags a coordinated version bump at the checked commit', () => {
-    expect(planAutomaticRelease(packages, '0.4.0', 'checked-sha', null)).toEqual({ _tag: 'Tag', tag: 'v0.5.0', sha: 'checked-sha' })
+    expect(planAutomaticRelease(packages, history(['0.4.0']), 'checked-sha', null)).toEqual({ _tag: 'Tag', tag: 'v0.5.0', sha: 'checked-sha' })
   })
 
-  it('skips an ordinary main commit', () => {
-    expect(planAutomaticRelease(packages, '0.5.0', 'checked-sha', null)).toEqual({ _tag: 'Skip' })
+  it('skips a version already published for every package', () => {
+    expect(planAutomaticRelease(packages, history(['0.5.0']), 'checked-sha', 'release-sha')).toEqual({ _tag: 'Skip' })
   })
 
-  it('skips a repeated successful CI run', () => {
-    expect(planAutomaticRelease(packages, '0.4.0', 'checked-sha', 'checked-sha')).toEqual({ _tag: 'Skip' })
+  it('retries an existing tag when publication has not completed', () => {
+    expect(planAutomaticRelease(packages, history(['0.4.0']), 'checked-sha', 'checked-sha')).toEqual({ _tag: 'Retry', tag: 'v0.5.0', sha: 'checked-sha' })
   })
 
   it('refuses to replace a tag from another commit', () => {
-    expect(() => planAutomaticRelease(packages, '0.4.0', 'checked-sha', 'other-sha')).toThrow('different commit')
+    expect(() => planAutomaticRelease(packages, history(['0.4.0']), 'checked-sha', 'other-sha')).toThrow('different commit')
   })
 
   it('rejects a partial version bump', () => {
-    expect(() => planAutomaticRelease([{ ...packages[0], version: '0.6.0' }, ...packages.slice(1)], '0.5.0', 'checked-sha', null)).toThrow('must match')
+    expect(() => planAutomaticRelease([{ ...packages[0], version: '0.6.0' }, ...packages.slice(1)], history(['0.4.0']), 'checked-sha', null)).toThrow('must match')
+  })
+
+  it('resumes a partially published release', () => {
+    const partial = history(['0.4.0'])
+    partial[0].versions.push('0.5.0')
+    expect(planAutomaticRelease(packages, partial, 'checked-sha', 'checked-sha')).toEqual({ _tag: 'Retry', tag: 'v0.5.0', sha: 'checked-sha' })
+  })
+
+  it.each(['0.6.0', '1.0.0', '0.5.1-beta.1'])('rejects a candidate older than published %s', (released) => {
+    expect(() => planAutomaticRelease(packages, history([released]), 'checked-sha', null)).toThrow('newer')
+  })
+
+  it.each([
+    ['0.5.0-beta.10', '0.5.0-beta.2'],
+    ['0.5.0-beta.a', '0.5.0-beta.10'],
+    ['0.5.0-beta.2.1', '0.5.0-beta.2'],
+    ['0.5.0', '0.5.0-rc.1'],
+    ['0.10.0', '0.9.0'],
+  ])('accepts %s after %s', (candidate, released) => {
+    const bumped = packages.map(pkg => ({ ...pkg, version: candidate }))
+    expect(planAutomaticRelease(bumped, history([released]), 'checked-sha', null)).toEqual({ _tag: 'Tag', tag: `v${candidate}`, sha: 'checked-sha' })
+  })
+
+  it.each([
+    ['0.5.0-beta.2', '0.5.0-beta.10'],
+    ['0.5.0-beta.10', '0.5.0-beta.a'],
+    ['0.5.0-rc.1', '0.5.0'],
+  ])('rejects %s after %s', (candidate, released) => {
+    expect(() => planAutomaticRelease(packages.map(pkg => ({ ...pkg, version: candidate })), history([released]), 'checked-sha', null)).toThrow('newer')
+  })
+
+  it('checks the release history of every package', () => {
+    const divergent = packages.map(pkg => ({ name: pkg.name, versions: [pkg.name === 'ripide-tsrx' ? '0.6.0' : '0.4.0'] }))
+    expect(() => planAutomaticRelease(packages, divergent, 'checked-sha', null)).toThrow('newer')
+  })
+})
+
+describe('published release history', () => {
+  it.each(['"0.4.0"', '["0.4.0"]'])('reads single-version npm metadata: %s', (stdout) => {
+    expect(readPublishedVersions(packages, () => ({ status: 0, stdout }))).toEqual(packages.map(pkg => ({ name: pkg.name, versions: ['0.4.0'] })))
+  })
+
+  it.each(['[]', '{}', '["invalid"]', '["0.4.0", null]'])('rejects malformed release history: %s', (stdout) => {
+    expect(() => readPublishedVersions(packages, () => ({ status: 0, stdout }))).toThrow(/Invalid/)
+  })
+
+  it.each(['E401', 'E503'])('surfaces npm failures: %s', (code) => {
+    expect(() => readPublishedVersions(packages, () => ({ status: 1, stdout: JSON.stringify({ error: { code } }) }))).toThrow('Registry lookup failed')
+  })
+
+  it('requires registration before preparing a release', () => {
+    expect(() => readPublishedVersions(packages, () => ({ status: 1, stdout: '{"error":{"code":"E404"}}' }))).toThrow('register')
   })
 })
 
 describe('publication registration', () => {
   const artifacts = packages.map(pkg => ({ ...pkg, tarball: `${pkg.name}.tgz`, integrity: 'sha512-local' }))
+
+  it('publishes nothing when a newer version appeared after tag preparation', () => {
+    const published: string[] = []
+    expect(() => publishRelease(artifacts, (name, field) => field === 'name'
+      ? { status: 0, stdout: JSON.stringify(name) }
+      : { status: 0, stdout: '["0.6.0"]' }, artifact => published.push(artifact.name), () => {})).toThrow('newer')
+    expect(published).toEqual([])
+  })
 
   it('publishes nothing when a later package has never been registered', () => {
     const published: string[] = []
@@ -43,6 +105,8 @@ describe('publication registration', () => {
     publishRelease(artifacts, (name, field) => {
       if (field === 'name')
         return { status: 0, stdout: JSON.stringify([name]) }
+      if (field === 'versions')
+        return { status: 0, stdout: '["0.4.0"]' }
       return name.startsWith('ripide-api@') ? { status: 0, stdout: '"sha512-local"' } : { status: 1, stdout: '{"error":{"code":"E404"}}' }
     }, artifact => published.push(artifact.name), () => {})
     expect(published).toEqual(['ripide-vue', 'ripide-tsrx', 'ripide'])
@@ -53,6 +117,8 @@ describe('publication registration', () => {
     expect(() => publishRelease(artifacts, (name, field) => {
       if (field === 'name')
         return { status: 0, stdout: JSON.stringify(name) }
+      if (field === 'versions')
+        return { status: 0, stdout: '["0.4.0"]' }
       return name.startsWith('ripide-tsrx@') ? { status: 0, stdout: '"sha512-other"' } : { status: 1, stdout: '{"error":{"code":"E404"}}' }
     }, artifact => published.push(artifact.name), () => {})).toThrow('different artifact')
     expect(published).toEqual([])
@@ -74,7 +140,7 @@ describe('publication registration', () => {
     const published: string[] = []
     expect(() => publishRelease(artifacts, (name, field) => field === 'name'
       ? { status: 0, stdout: JSON.stringify(name) }
-      : { status: 1, stdout: '{"error":{"code":"E404"}}' }, (artifact) => {
+      : field === 'versions' ? { status: 0, stdout: '["0.4.0"]' } : { status: 1, stdout: '{"error":{"code":"E404"}}' }, (artifact) => {
       if (artifact.name === 'ripide-vue')
         throw new Error('Publication failed')
       published.push(artifact.name)
