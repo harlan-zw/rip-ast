@@ -42,6 +42,7 @@ describe('automatic release', () => {
     ['0.5.0-beta.2.1', '0.5.0-beta.2'],
     ['0.5.0', '0.5.0-rc.1'],
     ['0.10.0', '0.9.0'],
+    ['0.5.0', '0.4.0+build.123'],
   ])('accepts %s after %s', (candidate, released) => {
     const bumped = packages.map(pkg => ({ ...pkg, version: candidate }))
     expect(planAutomaticRelease(bumped, history([released]), 'checked-sha', null)).toEqual({ _tag: 'Tag', tag: `v${candidate}`, sha: 'checked-sha' })
@@ -51,6 +52,7 @@ describe('automatic release', () => {
     ['0.5.0-beta.2', '0.5.0-beta.10'],
     ['0.5.0-beta.10', '0.5.0-beta.a'],
     ['0.5.0-rc.1', '0.5.0'],
+    ['0.5.0-rc.1', '0.5.0+build.123'],
   ])('rejects %s after %s', (candidate, released) => {
     expect(() => planAutomaticRelease(packages.map(pkg => ({ ...pkg, version: candidate })), history([released]), 'checked-sha', null)).toThrow('newer')
   })
@@ -62,11 +64,12 @@ describe('automatic release', () => {
 })
 
 describe('published release history', () => {
-  it.each(['"0.4.0"', '["0.4.0"]'])('reads single-version npm metadata: %s', (stdout) => {
-    expect(readPublishedVersions(packages, () => ({ status: 0, stdout }))).toEqual(packages.map(pkg => ({ name: pkg.name, versions: ['0.4.0'] })))
+  it.each(['0.4.0', '0.4.0+build.123'])('reads single-version npm metadata: %s', (version) => {
+    for (const stdout of [JSON.stringify(version), JSON.stringify([version])])
+      expect(readPublishedVersions(packages, () => ({ status: 0, stdout }))).toEqual(packages.map(pkg => ({ name: pkg.name, versions: [version] })))
   })
 
-  it.each(['[]', '{}', '["invalid"]', '["0.4.0", null]'])('rejects malformed release history: %s', (stdout) => {
+  it.each(['[]', '{}', '["invalid"]', '["0.4.0", null]', '["0.4.0+"]', '["0.4.0+build+extra"]', '["0.4.0+build..123"]'])('rejects malformed release history: %s', (stdout) => {
     expect(() => readPublishedVersions(packages, () => ({ status: 0, stdout }))).toThrow(/Invalid/)
   })
 

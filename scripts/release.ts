@@ -79,8 +79,9 @@ export function publicationDecision(response: RegistryResponse, integrity: strin
 
 function compareVersions(left: string, right: string): number {
   const parse = (version: string) => {
-    const match = versionPattern.exec(`v${version}`)
-    if (!match)
+    const [precedence, metadata, ...extra] = version.split('+')
+    const match = versionPattern.exec(`v${precedence}`)
+    if (!match || extra.length || (metadata !== undefined && !/^[\da-z-]+(?:\.[\da-z-]+)*$/i.test(metadata)))
       throw new Error('Invalid published version. Check npm release history before retrying.')
     return { core: match[1].split('-')[0].split('.').map(part => BigInt(part)), prerelease: match[2]?.split('.') }
   }
