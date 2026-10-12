@@ -19,6 +19,13 @@ async function main() {
     const context = scope === 'projects' ? projectContext(task) : { args: [], testPath: '.checks/proof.test.ts' }
     const test = join(project, context.testPath)
     const wrapper = fileURLToPath(new URL('./check-command.ts', import.meta.url))
+    if (mode === 'hybrid') {
+      const selected = spawnSync(process.execPath, [fileURLToPath(new URL('./check-workflow.ts', import.meta.url)), 'ripide'], {
+        encoding: 'utf8',
+        env: { ...process.env, RIPIDE_EXPERIMENT_TASK: task, RIPIDE_EXPERIMENT_SCOPE: scope },
+      })
+      assert.equal(selected.status, 0, selected.stderr)
+    }
     const execute = (color: string) => {
       const forced = mode !== 'direct'
       const executable = forced ? join(root, 'packages/cli/bin/ripide.mjs') : join(project, 'node_modules/vitest/vitest.mjs')
@@ -27,7 +34,7 @@ async function main() {
         : ['run', context.testPath, ...context.args, '--reporter=json', `--outputFile=.checks/${color}.json`]
       if (!forced)
         writeFileSync(test, `import {test, expect, vi} from 'vitest'\nimport {${row.scenario.symbol}} from '${relative(dirname(test), join(project, module))}'\n${row.scenario.tests}\n`)
-      const result = spawnSync(process.execPath, [wrapper, forced ? 'ripide' : 'vitest', executable, ...params], { cwd: project, encoding: 'utf8', input: row.scenario.tests, timeout: 60000, env: { ...process.env, HOME: join(process.env.RIPIDE_EXPERIMENT_RECORD_DIRECTORY!, 'home'), RIPIDE_EXPERIMENT_PROJECT: project, RIPIDE_EXPERIMENT_TEST_PATH: test } })
+      const result = spawnSync(process.execPath, [wrapper, forced ? 'ripide' : 'vitest', executable, ...params], { cwd: project, encoding: 'utf8', input: row.scenario.tests, timeout: 60000, env: { ...process.env, HOME: join(process.env.RIPIDE_EXPERIMENT_RECORD_DIRECTORY!, 'home'), RIPIDE_EXPERIMENT_PROJECT: project, RIPIDE_EXPERIMENT_TEST_PATH: test, RIPIDE_EXPERIMENT_VARIANT: 'guided' } })
       if (result.error)
         throw result.error
       if (result.status !== (color === 'red' ? 1 : 0))
@@ -37,6 +44,15 @@ async function main() {
     execute('red')
     writeFileSync(join(project, row.scenario.file), row.capture.original)
     execute('green')
+    const commandsPath = join(process.env.RIPIDE_EXPERIMENT_RECORD_DIRECTORY!, 'check-commands.jsonl')
+    const commands = () => readFileSync(commandsPath, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { assertionPath: string, capturedArtifact: string })
+    const firstGreen = commands().at(-1)!
+    const firstReport = readFileSync(firstGreen.capturedArtifact)
+    execute('green')
+    const retry = commands().at(-1)!
+    assert.notEqual(firstGreen.capturedArtifact, retry.capturedArtifact)
+    assert.deepEqual(readFileSync(firstGreen.capturedArtifact), firstReport)
+    assert.deepEqual(readFileSync(firstGreen.assertionPath), readFileSync(retry.assertionPath))
     rmSync(test, { force: true })
     const check = (expected: number, message?: string) => {
       const result = spawnSync(join(process.env.RIPIDE_EXPERIMENT_RECORD_DIRECTORY!, 'home/bin/check-behavior'), [], { cwd: project, encoding: 'utf8', timeout: 60000 })

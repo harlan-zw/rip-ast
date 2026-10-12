@@ -12,7 +12,7 @@ import { sha256 } from './manifest.ts'
 async function main() {
   const [project, task, provenance, mode, ...flags] = process.argv.slice(2)
   if (flags.length === 1 && flags[0] === '--help') {
-    console.log('Usage: check-behavior [--help]\nCheck behavior, source preservation, red and green execution evidence, and temporary code cleanup.\nKeep identical assertions for red and green. Remove existing artifacts before reusing their paths.\nRemove new test modules and code helpers from .checks. Keep assertions.txt.\nProject build and typecheck run separately.')
+    console.log('Usage: check-behavior [--help]\nCheck behavior, source preservation, red and green execution evidence, and temporary code cleanup.\nKeep identical assertions for red and green. Each execution captures assertions and a fresh report outside the project.\nRemove new test modules and code helpers from .checks.\nProject build and typecheck run separately.')
     return
   }
   if (flags.length)
@@ -130,13 +130,20 @@ async function main() {
     }
     const called = readFileSync(join(process.env.RIPIDE_EXPERIMENT_RECORD_DIRECTORY!, 'commands.called'), 'utf8').trim().split('\n')
     const commandFile = join(process.env.RIPIDE_EXPERIMENT_RECORD_DIRECTORY!, 'check-commands.jsonl')
-    const commands = readFileSync(commandFile, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { name: string, args: string[], started: string, assertionHash: string | null, sourceHash: string | null, artifact: string, artifactHash: string | null, testPath: string | null, exit: number })
+    const commands = readFileSync(commandFile, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { name: string, args: string[], started: string, assertionPath: string, assertionHash: string | null, sourceHash: string | null, artifact: string, capturedArtifact: string, artifactHash: string | null, testPath: string | null, exit: number })
     const evidence = (color: string) => commands.filter(command => command.artifact === join(project, '.checks', `${color}.json`)).at(-1)
     const before = evidence('red')
     const after = evidence('green')
     assert.ok(before?.assertionHash && after?.assertionHash, 'Record both assertion sources.')
     for (const [color, command, report] of [['red', before, red], ['green', after, green]] as const) {
       assert.equal(command.artifactHash, sha256(readFileSync(join(project, '.checks', `${color}.json`))), 'Keep the artifact from the recorded execution.')
+      assert.ok(command.assertionPath && command.capturedArtifact, 'Keep automatic execution evidence.')
+      for (const path of [command.assertionPath, command.capturedArtifact]) {
+        const location = relative(join(record, 'check-attempts'), path)
+        assert.ok(location && !location.startsWith('..'), 'Keep execution evidence in the record directory.')
+      }
+      assert.equal(command.assertionHash, sha256(readFileSync(command.assertionPath)), 'Keep the captured assertion source.')
+      assert.equal(command.artifactHash, sha256(readFileSync(command.capturedArtifact)), 'Keep the captured execution report.')
       if (command.name === 'vitest') {
         assert.ok(command.testPath && [projectContext(task).testPath, '.checks/proof.test.ts'].some(path => join(project, path) === command.testPath), 'Run the registered temporary module.')
         assert.deepEqual(report.testResults.map((file: { name: string }) => resolve(project, file.name)), [command.testPath], 'Run only the registered temporary module.')

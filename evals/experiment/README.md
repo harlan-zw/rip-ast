@@ -133,7 +133,13 @@ Commands record assertion hashes, source hashes, exits, and output bytes outside
 Red must run against the seeded source. Green must run identical assertions against the submitted repair.
 Transient workflows must record repaired-function execution. Integration and API obligations remain pending for assertion review.
 Private evaluation evidence may retain assertion text. The evaluated project retains no new test modules or code helpers.
-Keep reusable assertions in `.checks/assertions.txt`. Remove code helpers before recording the final green run.
+Every execution captures its assertion source in a private `check-attempts/attempt-*` directory outside the project.
+The wrapper allocates a fresh report path and copies the result to the requested project path.
+Retries preserve earlier reports and assertions. Reusing a project report path does not reuse its execution evidence.
+The gate checks both captured files against the recorded hashes. Prose archives cannot replace executed assertions.
+Remove code helpers before recording the final green run.
+The guided choice workflow uses `check-workflow vitest` or `check-workflow ripide` before receiving one recipe.
+The wrapper rejects a second runner in that workflow. Baseline instructions retain the original choice recipe.
 The supplied `check-behavior` command checks behavior, preservation, cleanup, and execution evidence.
 The controller also runs the registered build and typecheck commands.
 It rejects invalid evidence before build and typecheck. A failed check skips later checks and gates.
