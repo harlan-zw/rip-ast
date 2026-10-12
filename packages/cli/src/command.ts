@@ -47,12 +47,18 @@ export function defineStrictCommand<const T extends ArgsDef>(definition: Command
           if (!allowed.has(name))
             throw new Error(`Unknown option: --${name}. Run the command with --help.`)
         }
+        let globSeen = false
         for (const token of context.rawArgs) {
           if (token === '--')
             break
           if (!token.startsWith('--'))
             continue
           const name = token.slice(2).split('=')[0].replace(/^no-/, '')
+          if (name === 'glob') {
+            if (globSeen)
+              throw new Error('Option --glob can only be supplied once. Use a comma-separated value.')
+            globSeen = true
+          }
           if (!options.has(name))
             throw new Error(`Unknown option: --${name}. Run the command with --help.`)
         }

@@ -115,6 +115,49 @@ it('installs an adapter when its import entry is missing', () => {
   finally { fx.cleanup() }
 })
 
+it.each(['0.7.1', '2.0.0'])('launcher replaces an installed %s adapter with its own release', (adapterVersion) => {
+  const fx = makeFixture({
+    'package.json': '{"dependencies":{"vue":"*"}}',
+    'node_modules/ripide-vue/package.json': JSON.stringify({ name: 'ripide-vue', version: adapterVersion, type: 'module', exports: './dist/index.mjs' }),
+    'node_modules/ripide-vue/dist/index.mjs': 'throw new Error("Mismatched adapter must not load")',
+    'pnpm': '#!/bin/sh\nprintf "%s\\n" "$@" > args\nexit 0\n',
+  })
+  try {
+    chmodSync(resolve(fx.dir, 'pnpm'), 0o755)
+    const child = spawnSync(process.execPath, [prepareLauncher(fx), 'rename', 'old', 'next'], {
+      cwd: fx.dir,
+      env: { ...process.env, PATH: `${fx.dir}${delimiter}${process.env.PATH}`, RIPIDE_REEXEC: '' },
+      encoding: 'utf8',
+    })
+    assert.equal(child.status, 0, child.stderr)
+    assert.deepEqual(fx.read('args').trim().split('\n'), ['dlx', '--package=ripide@1.2.3', '--package=ripide-vue@1.2.3', 'ripide', 'rename', 'old', 'next'])
+  }
+  finally { fx.cleanup() }
+})
+
+it('launcher reuses an adapter from the same release without a package manager call', () => {
+  const fx = makeFixture({
+    'package.json': '{"dependencies":{"vue":"*"}}',
+    'source.ts': 'export const target = 1',
+    'node_modules/ripide-vue/package.json': '{"name":"ripide-vue","version":"1.2.3","type":"module","exports":"./dist/nested/index.mjs"}',
+    'node_modules/ripide-vue/dist/package.json': '{"type":"module"}',
+    'node_modules/ripide-vue/dist/nested/index.mjs': '',
+    'pnpm': '#!/bin/sh\necho called > manager\nexit 91\n',
+  })
+  try {
+    chmodSync(resolve(fx.dir, 'pnpm'), 0o755)
+    const child = spawnSync(process.execPath, [prepareLauncher(fx), 'scan', 'target', '--json'], {
+      cwd: fx.dir,
+      env: { ...process.env, PATH: `${fx.dir}${delimiter}${process.env.PATH}`, RIPIDE_REEXEC: '' },
+      encoding: 'utf8',
+    })
+    assert.equal(child.status, 0, child.stderr)
+    assert.equal(JSON.parse(child.stdout)._tag, 'Result')
+    assert.equal(existsSync(resolve(fx.dir, 'manager')), false)
+  }
+  finally { fx.cleanup() }
+})
+
 it('built CLI renames a symbol without Git when Vue work is disabled', () => {
   const fx = makeFixture({
     'package.json': '{"dependencies":{"vue":"*"}}',

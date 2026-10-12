@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 import spawn from 'cross-spawn'
 
 function jsonRequested(rawArgs) {
@@ -24,18 +25,46 @@ function ensureAdapters(needed) {
   if (!needed.length)
     return
 
+  const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   const missing = []
   for (const name of needed) {
+    const packageName = `ripide-${name}`
+    let entry
     try {
-      if (!existsSync(new URL(import.meta.resolve(`ripide-${name}`))))
-        missing.push(`ripide-${name}`)
+      entry = fileURLToPath(import.meta.resolve(packageName))
     }
-    catch { missing.push(`ripide-${name}`) }
+    catch {
+      // An unresolved adapter needs installation before the operation can run.
+      missing.push(packageName)
+      continue
+    }
+    if (!existsSync(entry)) {
+      missing.push(packageName)
+      continue
+    }
+    // Exports may hide package.json or put the entry inside nested dist directories.
+    let directory = dirname(entry)
+    let matchesRelease = false
+    while (true) {
+      const manifest = join(directory, 'package.json')
+      if (existsSync(manifest)) {
+        const installed = JSON.parse(readFileSync(manifest, 'utf8'))
+        if (installed.name === packageName) {
+          matchesRelease = installed.version === version
+          break
+        }
+      }
+      const parent = dirname(directory)
+      if (parent === directory)
+        break
+      directory = parent
+    }
+    if (!matchesRelease)
+      missing.push(packageName)
   }
   if (!missing.length)
     return
 
-  const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   const packages = ['ripide', ...missing].map(name => `--package=${name}@${version}`)
   const args = ['dlx', ...packages, 'ripide', ...process.argv.slice(2)]
   const json = jsonRequested(process.argv.slice(2))
