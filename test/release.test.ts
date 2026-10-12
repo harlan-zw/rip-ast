@@ -1,7 +1,87 @@
 import { describe, expect, it } from 'vitest'
-import { assertReplacementPublished, downloadPublishedPackages, planRelease, publicationDecision } from '../scripts/release.ts'
+import { assertReplacementPublished, downloadPublishedPackages, planAutomaticRelease, planRelease, publicationDecision, publishRelease } from '../scripts/release.ts'
 
 const packages = ['ripide-api', 'ripide-vue', 'ripide-tsrx', 'ripide'].map(name => ({ name, version: '0.5.0' }))
+
+describe('automatic release', () => {
+  it('tags a coordinated version bump at the checked commit', () => {
+    expect(planAutomaticRelease(packages, '0.4.0', 'checked-sha', null)).toEqual({ _tag: 'Tag', tag: 'v0.5.0', sha: 'checked-sha' })
+  })
+
+  it('skips an ordinary main commit', () => {
+    expect(planAutomaticRelease(packages, '0.5.0', 'checked-sha', null)).toEqual({ _tag: 'Skip' })
+  })
+
+  it('skips a repeated successful CI run', () => {
+    expect(planAutomaticRelease(packages, '0.4.0', 'checked-sha', 'checked-sha')).toEqual({ _tag: 'Skip' })
+  })
+
+  it('refuses to replace a tag from another commit', () => {
+    expect(() => planAutomaticRelease(packages, '0.4.0', 'checked-sha', 'other-sha')).toThrow('different commit')
+  })
+
+  it('rejects a partial version bump', () => {
+    expect(() => planAutomaticRelease([{ ...packages[0], version: '0.6.0' }, ...packages.slice(1)], '0.5.0', 'checked-sha', null)).toThrow('must match')
+  })
+})
+
+describe('publication registration', () => {
+  const artifacts = packages.map(pkg => ({ ...pkg, tarball: `${pkg.name}.tgz`, integrity: 'sha512-local' }))
+
+  it('publishes nothing when a later package has never been registered', () => {
+    const published: string[] = []
+    expect(() => publishRelease(artifacts, (name, field) => {
+      if (field === 'name')
+        return name === 'ripide-tsrx' ? { status: 1, stdout: '{"error":{"code":"E404"}}' } : { status: 0, stdout: JSON.stringify(name) }
+      return { status: 1, stdout: '{"error":{"code":"E404"}}' }
+    }, artifact => published.push(artifact.name), () => {})).toThrow('ripide-tsrx')
+    expect(published).toEqual([])
+  })
+
+  it('checks every artifact before publishing missing versions', () => {
+    const published: string[] = []
+    publishRelease(artifacts, (name, field) => {
+      if (field === 'name')
+        return { status: 0, stdout: JSON.stringify([name]) }
+      return name.startsWith('ripide-api@') ? { status: 0, stdout: '"sha512-local"' } : { status: 1, stdout: '{"error":{"code":"E404"}}' }
+    }, artifact => published.push(artifact.name), () => {})
+    expect(published).toEqual(['ripide-vue', 'ripide-tsrx', 'ripide'])
+  })
+
+  it('publishes nothing when a later artifact differs', () => {
+    const published: string[] = []
+    expect(() => publishRelease(artifacts, (name, field) => {
+      if (field === 'name')
+        return { status: 0, stdout: JSON.stringify(name) }
+      return name.startsWith('ripide-tsrx@') ? { status: 0, stdout: '"sha512-other"' } : { status: 1, stdout: '{"error":{"code":"E404"}}' }
+    }, artifact => published.push(artifact.name), () => {})).toThrow('different artifact')
+    expect(published).toEqual([])
+  })
+
+  it.each(['E401', 'E503'])('publishes nothing when registration lookup returns %s', (code) => {
+    const published: string[] = []
+    expect(() => publishRelease(artifacts, () => ({ status: 1, stdout: JSON.stringify({ error: { code } }) }), artifact => published.push(artifact.name), () => {})).toThrow('Registry lookup failed')
+    expect(published).toEqual([])
+  })
+
+  it('rejects a registry response for a different package', () => {
+    const published: string[] = []
+    expect(() => publishRelease(artifacts, () => ({ status: 0, stdout: '"another-package"' }), artifact => published.push(artifact.name), () => {})).toThrow('Registry metadata differs')
+    expect(published).toEqual([])
+  })
+
+  it('stops publication after a publish operation fails', () => {
+    const published: string[] = []
+    expect(() => publishRelease(artifacts, (name, field) => field === 'name'
+      ? { status: 0, stdout: JSON.stringify(name) }
+      : { status: 1, stdout: '{"error":{"code":"E404"}}' }, (artifact) => {
+      if (artifact.name === 'ripide-vue')
+        throw new Error('Publication failed')
+      published.push(artifact.name)
+    }, () => {})).toThrow('Publication failed')
+    expect(published).toEqual(['ripide-api'])
+  })
+})
 
 describe('legacy package deprecation', () => {
   it('requires the replacement release before deprecating legacy packages', () => {

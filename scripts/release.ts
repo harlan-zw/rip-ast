@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
 import { setTimeout } from 'node:timers/promises'
@@ -10,6 +10,8 @@ const folders = ['core', 'vue', 'tsrx', 'cli'] as const
 const packageNames = { core: 'ripide-api', vue: 'ripide-vue', tsrx: 'ripide-tsrx', cli: 'ripide' } as const
 interface ReleasePackage { name: string, version: string }
 interface RegistryResponse { status: number | null, stdout: string }
+interface ReleaseArtifact extends ReleasePackage { tarball: string, integrity: string }
+type AutomaticRelease = { _tag: 'Skip' } | { _tag: 'Tag', tag: string, sha: string }
 
 export function assertReplacementPublished(response: RegistryResponse, version: string) {
   if (response.status !== 0 || !response.stdout.trim() || JSON.parse(response.stdout) !== version)
@@ -49,7 +51,7 @@ export function planRelease(tag: string, packages: ReleasePackage[]) {
   return { version, npmTag: channel ? ['alpha', 'beta', 'rc'].includes(channel) ? channel : 'next' : 'latest' }
 }
 
-export function publicationDecision(response: RegistryResponse, integrity: string): 'publish' | 'skip' {
+function readRegistry(response: RegistryResponse): { _tag: 'Missing' } | { _tag: 'Found', value: unknown } {
   if (response.status === null || !response.stdout.trim())
     throw new Error('Registry lookup failed. Retry after checking npm connectivity.')
   const value: unknown = JSON.parse(response.stdout)
@@ -57,30 +59,105 @@ export function publicationDecision(response: RegistryResponse, integrity: strin
     if (typeof value === 'object' && value !== null && 'error' in value
       && typeof value.error === 'object' && value.error !== null
       && 'code' in value.error && value.error.code === 'E404') {
-      return 'publish'
+      return { _tag: 'Missing' }
     }
     throw new Error('Registry lookup failed. Resolve the npm error before publishing.')
   }
-  const publishedIntegrity = Array.isArray(value) && value.length === 1 ? value[0] : value
-  if (publishedIntegrity !== integrity)
+  return { _tag: 'Found', value: Array.isArray(value) && value.length === 1 ? value[0] : value }
+}
+
+export function publicationDecision(response: RegistryResponse, integrity: string): 'publish' | 'skip' {
+  const result = readRegistry(response)
+  if (result._tag === 'Missing')
+    return 'publish'
+  if (result.value !== integrity)
     throw new Error('This version contains a different artifact. Use a new version.')
   return 'skip'
 }
 
+export function planAutomaticRelease(packages: ReleasePackage[], previousVersion: string, sha: string, existingTagSha: string | null): AutomaticRelease {
+  const tag = `v${packages[0]?.version}`
+  const { version } = planRelease(tag, packages)
+  if (version === previousVersion)
+    return { _tag: 'Skip' }
+  if (existingTagSha !== null) {
+    if (existingTagSha !== sha)
+      throw new Error('This release tag points to a different commit. Use a new version.')
+    return { _tag: 'Skip' }
+  }
+  return { _tag: 'Tag', tag, sha }
+}
+
+export function publishRelease(
+  artifacts: ReleaseArtifact[],
+  lookup: (name: string, field: 'name' | 'dist.integrity') => RegistryResponse,
+  publish: (artifact: ReleaseArtifact) => void,
+  report: (message: string) => void,
+) {
+  for (const { name } of artifacts) {
+    const result = readRegistry(lookup(name, 'name'))
+    if (result._tag === 'Missing')
+      throw new Error(`If ${name} is new, register it and configure trusted publishing before retrying.`)
+    if (result.value !== name)
+      throw new Error(`Registry metadata differs for ${name}. Check the package registration before retrying.`)
+  }
+  const decisions = artifacts.map(artifact => ({ artifact, decision: publicationDecision(lookup(`${artifact.name}@${artifact.version}`, 'dist.integrity'), artifact.integrity) }))
+  for (const { artifact, decision } of decisions) {
+    if (decision === 'skip')
+      report(`${artifact.name}@${artifact.version} already contains this artifact.`)
+    else
+      publish(artifact)
+  }
+}
+
+function git(args: string[]) {
+  const response = spawnSync('git', args, { encoding: 'utf8' })
+  if (response.error)
+    throw response.error
+  if (response.status !== 0)
+    throw new Error(`Git command failed: git ${args.join(' ')}. ${response.stderr.trim()}`)
+  return response.stdout.trim()
+}
+
+function prepareRelease(packages: ReleasePackage[]) {
+  const sha = git(['rev-parse', 'HEAD'])
+  const previous = parsePackage(git(['show', 'HEAD^:packages/core/package.json']))
+  const candidate = `v${packages[0].version}`
+  planRelease(candidate, packages)
+  const refs = git(['tag', '--list', candidate])
+  const existingTagSha = refs ? git(['rev-parse', `refs/tags/${candidate}^{commit}`]) : null
+  const release = planAutomaticRelease(packages, previous.version, sha, existingTagSha)
+  if (release._tag === 'Skip') {
+    process.stdout.write('No new release tag is required.\n')
+    return
+  }
+  const output = `tag=${release.tag}\nsha=${release.sha}\n`
+  process.stdout.write(output)
+  if (process.env.GITHUB_OUTPUT)
+    appendFileSync(process.env.GITHUB_OUTPUT, output)
+}
+
+function parsePackage(contents: string): ReleasePackage {
+  const value: unknown = JSON.parse(contents)
+  if (typeof value !== 'object' || value === null || !('name' in value) || !('version' in value)
+    || typeof value.name !== 'string' || typeof value.version !== 'string') {
+    throw new Error('Invalid package metadata. Provide a package name and version.')
+  }
+  return { name: value.name, version: value.version }
+}
+
 function readPackages(cwd: string): ReleasePackage[] {
-  return folders.map((folder) => {
-    const value: unknown = JSON.parse(readFileSync(join(cwd, 'packages', folder, 'package.json'), 'utf8'))
-    if (typeof value !== 'object' || value === null || !('name' in value) || !('version' in value)
-      || typeof value.name !== 'string' || typeof value.version !== 'string') {
-      throw new Error(`Invalid package metadata: packages/${folder}/package.json.`)
-    }
-    return { name: value.name, version: value.version }
-  })
+  return folders.map(folder => parsePackage(readFileSync(join(cwd, 'packages', folder, 'package.json'), 'utf8')))
 }
 
 async function run() {
   const [command, tag = '', directory] = process.argv.slice(2)
-  const plan = planRelease(tag, readPackages(process.cwd()))
+  const packages = readPackages(process.cwd())
+  if (command === 'prepare') {
+    prepareRelease(packages)
+    return
+  }
+  const plan = planRelease(tag, packages)
   if (command === 'plan') {
     process.stdout.write(`version=${plan.version}\nnpmTag=${plan.npmTag}\n`)
     return
@@ -126,22 +203,20 @@ async function run() {
     const name = packageNames[folder]
     const tarball = join(directory, `${name.replace(/^@/, '').replace('/', '-')}-${plan.version}.tgz`)
     const integrity = `sha512-${createHash('sha512').update(readFileSync(tarball)).digest('base64')}`
-    const response = spawnSync(process.execPath, [npm, 'view', `${name}@${plan.version}`, 'dist.integrity', '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' })
+    return { name, version: plan.version, tarball, integrity }
+  })
+  publishRelease(artifacts, (name, field) => {
+    const response = spawnSync(process.execPath, [npm, 'view', name, field, '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' })
     if (response.error)
       throw response.error
-    return { name, tarball, decision: publicationDecision(response, integrity) }
-  })
-  for (const { name, tarball, decision } of artifacts) {
-    if (decision === 'skip') {
-      process.stdout.write(`${name}@${plan.version} already contains this artifact.\n`)
-      continue
-    }
+    return response
+  }, ({ name, tarball }) => {
     const published = spawnSync(process.execPath, [npm, 'publish', tarball, '--access=public', `--tag=${plan.npmTag}`, '--registry=https://registry.npmjs.org'], { stdio: 'inherit' })
     if (published.error)
       throw published.error
     if (published.status !== 0)
       throw new Error(`Publication failed for ${name}. Retry this release after resolving the npm error.`)
-  }
+  }, message => process.stdout.write(`${message}\n`))
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
