@@ -3,7 +3,33 @@
 If the task supplies an executable, use it. Prefer an existing project installation over a global CLI.
 If only a global CLI is available on PATH, use `ripide` directly.
 Otherwise, use the project's package manager from its instructions, metadata, or lockfile.
-Do not switch package managers or probe versions solely to choose a launcher.
+Do not switch package managers solely to choose a launcher.
+
+## Release selection
+
+The CLI package is `ripide`. The retired `@ripast/cli` package does not receive current releases.
+The Skill name remains `ripast`.
+
+Unless the task supplies an executable or version, check versions once at task start.
+For pnpm, read the registry release with `pnpm view ripide version`.
+Read the installed release with `pnpm exec ripide --version` or `ripide --version`, using the selected launcher.
+If no CLI is installed, only the registry check is needed.
+If the registry check fails, report that freshness is unknown. Do not claim the installed version is current.
+
+If the installed release is older, use a temporary launcher with the exact returned version.
+For example, if the registry returns `0.9.0`:
+
+```bash
+pnpm dlx --package=ripide@0.9.0 --package=ripide-vue@0.9.0 ripide --version
+```
+
+Reuse that launcher for the task. Replace the example version with the registry result.
+An unversioned temporary launcher can reuse cached packages. An explicit version selects the intended release.
+Include the matching Vue adapter for Vue/Nuxt projects.
+Keep project dependency pins unchanged. Upgrade globals only when authorized, and announce the version first.
+Do not delete package manager caches to refresh a launcher.
+An installed Skill has its own revision. A CLI upgrade does not refresh Skill instructions.
+If a project declares this Skill, refresh its source revision through that declaration and run its sync command.
 
 For repeated use, prefer installing globally once over a temporary launcher on every command.
 If no CLI is installed, use the matching global command, then run `ripide` directly:
@@ -19,12 +45,12 @@ Yarn 2+ has no global install command. Use npm for global tooling, or the Yarn l
 Include `ripide-vue` to avoid temporary adapter installation in Vue/Nuxt projects.
 Respect environment rules that prohibit global installs. Use temporary launchers for one-off or restricted environments.
 If the global binary is unavailable, add the manager's global bin directory to PATH or use a temporary launcher.
-Do not reinstall before each command or silently upgrade an existing CLI.
+Do not reinstall before each command. Reuse the release selected at task start.
 
 | Package manager | Installed CLI | Temporary CLI |
 | --- | --- | --- |
 | npm | `npm exec -- ripide` | `npm exec --yes --package=ripide -- ripide` |
-| pnpm | `pnpm exec ripide` | `pnpm dlx ripide` |
+| pnpm | `pnpm exec ripide` | `pnpm dlx ripide@<version>` |
 | Yarn 2+ | `yarn exec ripide` | `yarn dlx --package ripide ripide` |
 | Bun | `bunx --no-install --package ripide ripide` | `bunx --package ripide ripide` |
 
@@ -41,6 +67,7 @@ Global installation: [npm](https://docs.npmjs.com/cli/v11/commands/npm-install/)
 ## Adapters and runtime
 
 The CLI installs missing Vue/Nuxt adapters through pnpm, then npm. pnpm is optional.
+Automatic adapters must match the CLI release, including adapters already installed.
 If neither is available, install the CLI and adapter together with the project's package manager.
 Yarn 2+ can include both temporarily: `yarn dlx -p ripide -p ripide-vue ripide <command> ...`.
 Keep Node available for Bun launchers. Do not force Bun's runtime with `--bun`.

@@ -18,7 +18,12 @@ Read [replacement scope and limits](references/commands.md#scope-and-output) bef
 
 Use a supplied executable first, then an existing project CLI, then a global `ripide`.
 For repeated use, prefer installing `ripide` and `ripide-vue` globally once with the project manager.
-Do not reinstall or silently upgrade before commands. Skip installation and version probes when a CLI is supplied.
+The package is `ripide`. Do not launch the retired `@ripast/cli` package.
+Unless an executable or version is supplied, check the installed and registry versions once per task.
+If the installed CLI is older, use the exact registry release through a temporary launcher.
+Keep project dependency pins unchanged. Announce any authorized global upgrade before installing it.
+Reuse the selected executable and version throughout the task. Do not reinstall before each command.
+Skip installation and version probes when a CLI is supplied.
 If setup is needed, read [installation and launchers](references/setup.md), including one-off and restricted environments.
 
 ## Workflow
@@ -73,6 +78,10 @@ Value-only strings such as `"--foo-a 1s"` receive warnings. Inspect their CSS pr
 Warnings include nested static candidates, ambiguous CSS values, and encoded style attributes. Prove their meaning before editing.
 Save complete warnings with `--json --artifact <new-file.json>`. Use the reference's agent review procedure for skipped sites.
 If no files changed, resolve the target, root, or configuration before retrying.
+Rename accepts two positional names. Use `--scope <file>` instead of a third positional path.
+Dry run is the default. There is no `--dry-run` flag.
+Quote one comma-separated `--glob` value. Do not repeat `--glob` or assume shell word splitting.
+Keep stderr and the exit code. Do not pipe command results through `head` or `tail` to judge success.
 If diagnostics increased, inspect the cause. Never disable verification to force success.
 Inspect more files only when results expose uncertainty. Repeat a successful check only after another edit or new failure.
 Search for one uncertainty that can change the next step. Keep full output in artifacts; read relevant evidence only.
