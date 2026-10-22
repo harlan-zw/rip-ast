@@ -173,6 +173,7 @@ async function execute(request: ResolvedInlineTestRequest): Promise<InlineTestRe
         thresholds: {},
       },
       cache: false,
+      fsModuleCache: false,
       reporters: [{
         onCoverage(coverage) {
           const data = object(object(coverage).data)

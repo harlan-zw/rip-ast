@@ -56,8 +56,8 @@
     "diff": "^9.0.0",
     "hookable": "^6.1.2",
     "html-entities": "^2.6.0",
-    "ignore": "^7.0.12",
-    "oxc-parser": "^0.153.0",
+    "ignore": "^7.0.13",
+    "oxc-parser": "^0.155.0",
     "oxc-walker": "^1.1.1",
     "picomatch": "^4.0.7",
     "typescript-native": "npm:typescript@7.1.0-dev.20260905.1"
