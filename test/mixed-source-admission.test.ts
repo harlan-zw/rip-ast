@@ -92,3 +92,21 @@ it.each([
   await expect(engine.delete('unusedHelper', 'source.ts', { cwd, verifyMode: 'project' })).rejects.toThrow(/Required extension missing/)
   expect(readFileSync(join(cwd, 'source.ts'), 'utf8')).toBe('export const shared = 2\nexport function unusedHelper() { return 1 }\n')
 })
+
+it.each(['View.vue', 'View.tsrx'])('still rejects mixed framework semantics when %s is ignored', async (ignored) => {
+  const cwd = fixture({
+    '.gitignore': `${ignored}\n`,
+    'View.vue': '<script setup lang="ts">import { shared } from "./source.ts"</script><template>{{ shared }}</template>',
+    'View.tsrx': 'import { shared } from "./source.ts"\nexport function View() @{ <span>{shared}</span> }\n',
+  })
+  execFileSync('git', ['init', '--quiet'], { cwd })
+  const operations: string[] = []
+  const engine = createEngine({ extensions: [{ ...createVueExtension(), setup(hooks) {
+    hooks.hook('operation:before', (operation) => {
+      operations.push(operation.operation)
+    })
+  } }] })
+  await expect(engine.rename('shared', 'next', { cwd, scope: 'source.ts', verifyMode: 'project' })).rejects.toThrow(/TSRX semantic operations cannot run with framework extensions/)
+  expect(operations).toEqual([])
+  expect(readFileSync(join(cwd, 'source.ts'), 'utf8')).toBe('export const shared = 2\nexport function unusedHelper() { return 1 }\n')
+})
