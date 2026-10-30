@@ -65,7 +65,7 @@ const EXTS = ['.ts', '.tsx', '.tsrx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.c
 // Git excludes `.git` from tracked files; the rest are workflow
 // caches that frequently leak into open-ended scans (claude worktrees, skilld
 // snapshots, etc.).
-const DEFAULT_EXCLUDES = ['!.claude/worktrees/**', '!**/.claude/worktrees/**']
+const DEFAULT_EXCLUDES = ['!**/.git', '!**/.git/**', '!.claude/worktrees/**', '!**/.claude/worktrees/**']
 
 function discoverySelection(userGlobs: string[]) {
   // Only a literal directory segment opts into dependencies. Broad source globs do not.

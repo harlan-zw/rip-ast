@@ -288,9 +288,6 @@ importers:
       '@vue/language-core':
         specifier: ^3.3.13
         version: 3.3.13
-      '@vue/language-service':
-        specifier: ^3.3.13
-        version: 3.3.13(@typescript/typescript6@6.0.2)
       html-entities:
         specifier: ^2.6.0
         version: 2.6.0
@@ -316,6 +313,9 @@ importers:
         specifier: ^3.2.0
         version: 3.2.0
     devDependencies:
+      '@vue/language-service':
+        specifier: ^3.3.13
+        version: 3.3.13(@typescript/typescript6@6.0.2)
       ripide-api:
         specifier: workspace:*
         version: link:../core

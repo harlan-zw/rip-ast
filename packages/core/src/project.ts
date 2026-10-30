@@ -52,13 +52,21 @@ export function isInsideAutoImportScope(path: string, scopes: Set<string>): bool
 
 /** Refuse unregistered authored code discovered outside the native source suffixes. */
 export function assertSourceSupport(cwd: string, engine?: EngineServices): void {
-  const nonCode = new Set(['.json', '.md', '.yaml', '.yml', '.txt', '.css', '.scss', '.sass', '.less', '.html', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.ico', '.woff', '.woff2', '.lock', '.map'])
-  const files = findFiles('', { cwd, glob: '*', listAll: true })
-  if (files.some(path => path.endsWith('.tsrx')) && files.some(path => engine?.owns(path)))
-    throw new Error('TSRX semantic operations cannot run with framework extensions. Use separate projects.')
+  // Semantic suffix globs include ignored sources. Check their incompatibility
+  // before the separate, ignore-respecting admission scan.
+  if (engine?.suffixes.length) {
+    const semanticFiles = findFiles('', { cwd, engine, listAll: true })
+    if (semanticFiles.some(path => path.endsWith('.tsrx')) && semanticFiles.some(path => engine.owns(path)))
+      throw new Error('TSRX semantic operations cannot run with framework extensions. Use separate projects.')
+  }
+  // Python imports and patch context are not JavaScript consumers. Keep unknown
+  // authored suffixes behind the extension check below.
+  const nonScript = new Set(['.json', '.md', '.yaml', '.yml', '.txt', '.css', '.scss', '.sass', '.less', '.html', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.ico', '.woff', '.woff2', '.lock', '.map', '.py', '.patch', '.diff'])
+  // A positive wildcard overrides ripgrep ignores, including Git metadata.
+  const files = findFiles('', { cwd, glob: [], listAll: true })
   for (const path of files) {
     const suffix = extname(path)
-    if (nonCode.has(suffix) || /^(?:\.ts|\.tsx|\.tsrx|\.js|\.jsx|\.mts|\.cts|\.mjs|\.cjs)$/.test(suffix) || engine?.owns(path))
+    if (nonScript.has(suffix) || /^(?:\.ts|\.tsx|\.tsrx|\.js|\.jsx|\.mts|\.cts|\.mjs|\.cjs)$/.test(suffix) || engine?.owns(path))
       continue
     const source = readFileSync(path, 'utf8')
     if (/^\s*(?:import\s+|export\s+(?:default\b|(?:declare\s+)?(?:const|let|var|function|class|interface|type|enum|namespace|async)\b|\{|\*)|<script(?:\s|>)|<template(?:\s|>))/m.test(source))

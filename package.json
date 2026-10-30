@@ -33,6 +33,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke:package": "node --experimental-strip-types scripts/smoke-package.ts",
+    "smoke:pnpm-package": "node --experimental-strip-types scripts/smoke-pnpm-package.ts",
     "release": "bumpp --recursive",
     "release:deprecate": "node --experimental-strip-types scripts/release.ts deprecate",
     "release:download": "node --experimental-strip-types scripts/release.ts download",
