@@ -33,6 +33,7 @@ jobs:
       - run: pnpm exec vitest run test/ts-server.test.ts test/launcher-platform.test.ts test/platform-paths.test.ts test/inline-test.test.ts test/check.test.ts test/tsrx.test.ts
       - run: pnpm -r --filter './packages/*' pack --pack-destination "${{ runner.temp }}/ripide-pack"
       - run: npm run smoke:package -- "${{ runner.temp }}/ripide-pack"
+      - run: pnpm smoke:pnpm-package "${{ runner.temp }}/ripide-pack"
 
   test:
     runs-on: ubuntu-24.04
@@ -61,3 +62,4 @@ jobs:
       - run: pnpm -r --filter './packages/*' exec publint
       - run: pnpm -r --filter './packages/*' pack --pack-destination "${{ runner.temp }}/ripide-pack"
       - run: npm run smoke:package -- "${{ runner.temp }}/ripide-pack"
+      - run: pnpm smoke:pnpm-package "${{ runner.temp }}/ripide-pack"
